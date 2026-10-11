@@ -1,8 +1,10 @@
 #include "test_harness.h"
 #include "gbaimp/hooks.h"
 #include "gbaimp/input_enhancements.h"
+#include "gbaimp/dialog_turbo.h"
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 
 using namespace gbaimp;
 
@@ -60,45 +62,33 @@ int main() {
     CHECK(in.get_key_scancode(KEY_UP) == SDL_SCANCODE_W);
     CHECK(in.get_key_scancode(KEY_A) == SDL_SCANCODE_J);
 
-    // Keybinds round trip including the [gamepad] section.
+    // Keybinds round trip ([player1] and [turbo]; gamepad mapping is not persisted here).
     const std::string ini = tmp.file("roundtrip.ini");
     in.set_key_scancode(KEY_A, SDL_SCANCODE_Q);          // -> Custom keyboard preset
     in.set_key_scancode(KEY_START, SDL_SCANCODE_SPACE);
-    in.set_pad_a(static_cast<int>(PadButtonChoice::ButtonY));
-    in.set_pad_b(static_cast<int>(PadButtonChoice::ButtonX));
-    in.set_pad_l(static_cast<int>(PadButtonChoice::LeftTrigger));
-    in.set_pad_r(static_cast<int>(PadButtonChoice::RightBumper));
     in.save_keybinds(ini.c_str());
     {
         std::string text = slurp(ini);
         CHECK(text.find("[player1]") != std::string::npos);
-        CHECK(text.find("[gamepad]") != std::string::npos);
-        CHECK(text.find("pad_a = 3") != std::string::npos);
-        CHECK(text.find("pad_l = 6") != std::string::npos);
-        CHECK(text.find("profile = 5") != std::string::npos);   // Custom
+        CHECK(text.find("[gamepad]") == std::string::npos);
+        CHECK(text.find("pad_a") == std::string::npos);
     }
     in.reset_to_defaults();
     CHECK(in.get_key_scancode(KEY_A) == SDL_SCANCODE_X);
-    CHECK(in.settings().pad_a == PadButtonChoice::ButtonA);
     in.load_keybinds(ini.c_str());
     CHECK(in.get_key_scancode(KEY_A) == SDL_SCANCODE_Q);
     CHECK(in.get_key_scancode(KEY_START) == SDL_SCANCODE_SPACE);
-    CHECK(in.settings().gamepad_profile == GamepadProfile::Custom);
-    CHECK(in.settings().pad_a == PadButtonChoice::ButtonY);
-    CHECK(in.settings().pad_b == PadButtonChoice::ButtonX);
-    CHECK(in.settings().pad_l == PadButtonChoice::LeftTrigger);
-    CHECK(in.settings().pad_r == PadButtonChoice::RightBumper);
 
-    // A non-Custom profile in the file re-applies that profile's mapping.
+    // A stray [gamepad] section in an old file is ignored: the gamepad mapping is not persisted here.
     {
         const std::string ini2 = tmp.file("profile.ini");
         std::ofstream f(ini2);
-        f << "# comment\n[gamepad]\nprofile = 4\npad_a = 7\n";
+        f << "# comment" << std::endl << "[gamepad]" << std::endl << "profile = 4" << std::endl << "pad_a = 7" << std::endl;
         f.close();
+        in.reset_gamepad_defaults();
         in.load_keybinds(ini2.c_str());
-        CHECK(in.settings().gamepad_profile == GamepadProfile::Triggers);
-        CHECK(in.settings().pad_a == PadButtonChoice::ButtonA);   // profile wins over stray key
-        CHECK(in.settings().pad_l == PadButtonChoice::LeftTrigger);
+        CHECK(in.settings().gamepad_profile == GamepadProfile::Standard);
+        CHECK(in.settings().pad_a == PadButtonChoice::ButtonA);
     }
 
     // Missing file is a silent no-op.
@@ -181,6 +171,208 @@ int main() {
         CHECK_EQ(in.process_keyinput(0x03FF), uint16_t(0x03FF));
 
         hooks() = Hooks{};
+    }
+
+    // --- Configurable keybinds path / autosave (no hidden writes) ---------------
+    {
+        namespace fs = std::filesystem;
+        testh::TempDir cfg("input_cfg");
+        cfg.enter();                                   // cwd is empty: stray writes are detectable
+        const std::string a_ini = cfg.file("sub_a.ini");
+
+        InputEnhancements a(a_ini);                    // missing file: defaults, no crash
+        CHECK_EQ(a.keybinds_path(), a_ini);
+        CHECK(a.autosave_keybinds());                  // historical default
+
+        // Default behavior: presets persist to the configured path (not the cwd).
+        a.apply_keyboard_preset(KeyboardPreset::Wasd);
+        CHECK(fs::exists(a_ini));
+        CHECK(!fs::exists("keybinds.ini"));
+        CHECK(slurp(a_ini).find("A = J") != std::string::npos);
+
+        // A second instance reads that file on construction.
+        InputEnhancements a2(a_ini);
+        CHECK_EQ(int(a2.get_key_scancode(KEY_A)), int(SDL_SCANCODE_J));
+
+        // Autosave off: no file is written by presets or resets.
+        fs::remove(a_ini);
+        a.set_autosave_keybinds(false);
+        CHECK(!a.autosave_keybinds());
+        a.apply_keyboard_preset(KeyboardPreset::Emulation);
+        a.reset_to_defaults();
+        a.reset_keyboard_defaults();
+        CHECK(!fs::exists(a_ini));
+        CHECK(!fs::exists("keybinds.ini"));
+        CHECK_EQ(int(a.get_key_scancode(KEY_A)), int(SDL_SCANCODE_X));  // preset itself still applied
+
+        // Explicit save/load use the configured path when none is passed.
+        const std::string b_ini = cfg.file("b.ini");
+        a.set_keybinds_path(b_ini);
+        a.apply_keyboard_preset(KeyboardPreset::ArrowsQW);
+        a.save_keybinds();
+        CHECK(fs::exists(b_ini));
+        InputEnhancements b;                           // default ctor: reads ./keybinds.ini (absent)
+        CHECK_EQ(b.keybinds_path(), std::string("keybinds.ini"));
+        b.set_autosave_keybinds(false);
+        b.set_keybinds_path(b_ini);
+        b.load_keybinds();
+        CHECK_EQ(int(b.get_key_scancode(KEY_L)), int(SDL_SCANCODE_Q));
+        a.set_keybinds_path("");                       // empty restores the default name
+        CHECK_EQ(a.keybinds_path(), std::string("keybinds.ini"));
+        CHECK(!fs::exists("keybinds.ini"));
+    }
+
+    // --- process_keyinput state is per instance (no function-level statics) -----
+    {
+        testh::TempDir cfg("input_state");
+        cfg.enter();
+        SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+        const Uint8* ks = SDL_GetKeyboardState(nullptr);
+        CHECK(ks != nullptr);
+        if (ks) {
+            Uint8* mut = const_cast<Uint8*>(ks);       // synthetic key state (X held)
+            mut[SDL_SCANCODE_X] = 1;
+
+            InputEnhancements p(cfg.file("p.ini"));    // default layout: X = GBA A
+            InputEnhancements q(cfg.file("q.ini"));
+            p.set_autosave_keybinds(false);
+            q.set_autosave_keybinds(false);
+            q.apply_keyboard_preset(KeyboardPreset::Wasd);   // J = A, X unbound
+
+            uint64_t frame = 5000;
+            hooks().is_input_blocked = nullptr;
+            hooks().frame_counter = [&] { return frame; };
+
+            const uint16_t kp = p.process_keyinput(0x03FF);
+            CHECK_EQ(kp, uint16_t(0x03FE));            // X -> A pressed
+            // Same frame and host keys on a DIFFERENT instance must not hit p's cache.
+            const uint16_t kq = q.process_keyinput(0x03FF);
+            CHECK_EQ(kq, uint16_t(0x03FF));
+            // And p still serves its own cached value for this frame.
+            CHECK_EQ(p.process_keyinput(0x03FF), uint16_t(0x03FE));
+
+            // Within a frame q serves its cache; reset_to_defaults() drops it.
+            q.set_key_scancode(KEY_A, SDL_SCANCODE_X);
+            CHECK_EQ(q.process_keyinput(0x03FF), uint16_t(0x03FF));  // cached for this frame
+            q.reset_to_defaults();
+            CHECK_EQ(q.process_keyinput(0x03FF), uint16_t(0x03FE));  // recomputed: X = A again
+
+            mut[SDL_SCANCODE_X] = 0;
+            hooks() = Hooks{};
+        }
+    }
+
+    // --- Dialog turbo: defaults, configuration, persistence -----------------------
+    {
+        testh::TempDir cfg("input_turbo_cfg");
+        cfg.enter();
+        InputEnhancements t(cfg.file("t.ini"));
+        t.set_autosave_keybinds(false);
+        CHECK_EQ(int(t.settings().turbo_key), int(SDL_SCANCODE_TAB));
+        CHECK(t.settings().turbo_pad == PadButtonChoice::ButtonY);
+        t.set_turbo_pad(99);
+        CHECK(t.settings().turbo_pad == PadButtonChoice::RightTrigger);
+        t.set_turbo_pad(-1);
+        CHECK(t.settings().turbo_pad == PadButtonChoice::ButtonA);
+        CHECK(!t.set_turbo_key_from_name("not a key"));
+        CHECK(!t.set_turbo_key_from_name(nullptr));
+        CHECK(t.set_turbo_key_from_name("Space"));
+        CHECK_EQ(int(t.settings().turbo_key), int(SDL_SCANCODE_SPACE));
+        t.set_turbo_pad(5);
+        t.save_keybinds();
+        CHECK(slurp(cfg.file("t.ini")).find("[turbo]") != std::string::npos);
+
+        InputEnhancements u(cfg.file("t.ini"));
+        CHECK_EQ(int(u.settings().turbo_key), int(SDL_SCANCODE_SPACE));
+        CHECK(u.settings().turbo_pad == PadButtonChoice::RightBumper);
+
+        // Key disabled ("None") round-trips.
+        t.set_turbo_key(SDL_SCANCODE_UNKNOWN);
+        t.save_keybinds();
+        CHECK(slurp(cfg.file("t.ini")).find("key = None") != std::string::npos);
+        InputEnhancements v(cfg.file("t.ini"));
+        CHECK_EQ(int(v.settings().turbo_key), int(SDL_SCANCODE_UNKNOWN));
+
+        // A file without a [turbo] section keeps the defaults.
+        { std::ofstream f(cfg.file("old.ini")); f << "[player1]\nA = X\n"; }
+        InputEnhancements w(cfg.file("old.ini"));
+        CHECK_EQ(int(w.settings().turbo_key), int(SDL_SCANCODE_TAB));
+        CHECK(w.settings().turbo_pad == PadButtonChoice::ButtonY);
+    }
+
+    // --- Dialog turbo: process_keyinput drives DialogTurbo::set_held ---------------
+    {
+        testh::TempDir cfg("input_turbo");
+        cfg.enter();
+        SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+        const Uint8* ks = SDL_GetKeyboardState(nullptr);
+        CHECK(ks != nullptr);
+        if (ks) {
+            Uint8* mut = const_cast<Uint8*>(ks);
+            InputEnhancements p(cfg.file("p.ini"));
+            p.set_autosave_keybinds(false);
+            DialogTurbo turbo;
+            p.set_dialog_turbo(&turbo);
+            CHECK(&p.dialog_turbo() == &turbo);
+            CHECK(&InputEnhancements::instance().dialog_turbo() == &DialogTurbo::instance());
+
+            uint64_t frame = 100;
+            hooks().is_input_blocked = nullptr;
+            hooks().frame_counter = [&] { return frame; };
+
+            // Count A/B pulses over 8 frames.
+            auto run = [&](int frames) {
+                int pulses = 0;
+                for (int i = 0; i < frames; ++i) {
+                    ++frame;
+                    const uint16_t k = p.process_keyinput(0x03FF);
+                    if ((k & 0x3) == 0) ++pulses;
+                    else CHECK_EQ(int(k & 0x3), 0x3);
+                }
+                return pulses;
+            };
+
+            // Released: never held, never pulses.
+            CHECK_EQ(run(8), 0);
+            CHECK(!turbo.is_held());
+
+            // Held (default Tab): held is driven, A+B pulse (speed 2 -> every other frame).
+            mut[SDL_SCANCODE_TAB] = 1;
+            CHECK_EQ(run(8), 4);
+            CHECK(turbo.is_held());
+
+            // Released again: held drops and pulses stop.
+            mut[SDL_SCANCODE_TAB] = 0;
+            CHECK_EQ(run(8), 0);
+            CHECK(!turbo.is_held());
+
+            // Disabled DialogTurbo: held is still tracked but no pulses.
+            turbo.set_enabled(false);
+            mut[SDL_SCANCODE_TAB] = 1;
+            CHECK_EQ(run(8), 0);
+            CHECK(turbo.is_held());
+            turbo.set_enabled(true);
+
+            // Remapped key: Tab no longer triggers, the new key does.
+            p.set_turbo_key(SDL_SCANCODE_F5);
+            CHECK_EQ(run(4), 0);
+            mut[SDL_SCANCODE_TAB] = 0;
+            mut[SDL_SCANCODE_F5] = 1;
+            CHECK_EQ(run(8), 4);
+            mut[SDL_SCANCODE_F5] = 0;
+
+            // Input blocked releases the held state.
+            mut[SDL_SCANCODE_F5] = 1;
+            run(2);
+            CHECK(turbo.is_held());
+            hooks().is_input_blocked = [] { return true; };
+            ++frame;
+            CHECK_EQ(p.process_keyinput(0x03FF), uint16_t(0x03FF));
+            CHECK(!turbo.is_held());
+
+            mut[SDL_SCANCODE_F5] = 0;
+            hooks() = Hooks{};
+        }
     }
 
     return testh::finish("input_enhancements");

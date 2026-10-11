@@ -1,9 +1,4 @@
 #include "gbaimp/audio_dsp.h"
-#include "gbaimp/hd_audio_player.h"
-#include <SDL.h>
-#ifdef SDL_QueueAudio
-#undef SDL_QueueAudio
-#endif
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -14,7 +9,10 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 
-void design_lowpass(AudioDspSettings, float fc, float fs, float q, float& b0, float& b1, float& b2, float& a1, float& a2) {
+// Biquad coefficients follow R. Bristow-Johnson's "Audio EQ Cookbook"
+// (low-pass, peaking EQ, low shelf and high shelf formulas).
+
+void design_lowpass(float fc, float fs, float q, float& b0, float& b1, float& b2, float& a1, float& a2) {
     float w0 = 2.0f * kPi * (fc / fs);
     float alpha = std::sin(w0) / (2.0f * q);
     float cos_w0 = std::cos(w0);
@@ -89,11 +87,13 @@ AudioDsp& AudioDsp::instance() {
 
 AudioDsp::AudioDsp() {
     apply_preset(settings_.preset);
-    update_coefficients(last_sample_rate_);
+    refresh_coefficients(last_sample_rate_);
 }
 
 void AudioDsp::apply_preset(EqPreset preset) {
     settings_.preset = preset;
+    // Fields are stored one by one: a concurrent block may see a mix of old and new values
+    // for a few milliseconds (each value is valid on its own), never a torn one.
     switch (preset) {
         case EqPreset::Flat:
             settings_.bass_gain_db = 0.0f;
@@ -124,7 +124,6 @@ void AudioDsp::apply_preset(EqPreset preset) {
             settings_.stereo_width = 1.2f;
             break;
     }
-    update_coefficients(last_sample_rate_);
 }
 
 void AudioDsp::set_stereo_width(float width) {
@@ -133,62 +132,92 @@ void AudioDsp::set_stereo_width(float width) {
 
 void AudioDsp::set_anti_aliasing(bool enable) {
     settings_.anti_aliasing_filter = enable;
-    update_coefficients(last_sample_rate_);
 }
 
 void AudioDsp::set_limiter(bool enable) {
     settings_.limiter_enabled = enable;
 }
 
-void AudioDsp::update_coefficients(int sample_rate) {
+void AudioDsp::reset() {
+    reset_requested_.store(true, std::memory_order_release);
+}
+
+void AudioDsp::refresh_coefficients(int sample_rate) {
+    if (reset_requested_.exchange(false, std::memory_order_acq_rel)) {
+        for (Biquad* q : {&lp_l_, &lp_r_, &bass_l_, &bass_r_, &mid_l_, &mid_r_, &treble_l_, &treble_r_,
+                          &lp_m_, &bass_m_, &mid_m_, &treble_m_}) {
+            q->reset();
+        }
+    }
+    const float bass = settings_.bass_gain_db;
+    const float mid = settings_.mid_gain_db;
+    const float treble = settings_.treble_gain_db;
+    if (sample_rate == last_sample_rate_ && bass == applied_bass_db_ && mid == applied_mid_db_ &&
+        treble == applied_treble_db_ && applied_valid_) {
+        return;
+    }
+    update_coefficients(sample_rate, bass, mid, treble);
+}
+
+void AudioDsp::update_coefficients(int sample_rate, float bass_db, float mid_db, float treble_db) {
     last_sample_rate_ = sample_rate;
+    applied_bass_db_ = bass_db;
+    applied_mid_db_ = mid_db;
+    applied_treble_db_ = treble_db;
+    applied_valid_ = true;
     float fs = static_cast<float>(sample_rate);
 
     float b0, b1, b2, a1, a2;
+    auto assign = [&](Biquad& l, Biquad& r, Biquad& m) {
+        for (Biquad* q : {&l, &r, &m}) {
+            q->b0 = b0; q->b1 = b1; q->b2 = b2;
+            q->a1 = a1; q->a2 = a2;
+        }
+    };
 
     float lp_cutoff = std::min(15000.0f, fs * 0.45f);
-    design_lowpass(settings_, lp_cutoff, fs, 0.707f, b0, b1, b2, a1, a2);
-    lp_l_.b0 = lp_r_.b0 = b0;
-    lp_l_.b1 = lp_r_.b1 = b1;
-    lp_l_.b2 = lp_r_.b2 = b2;
-    lp_l_.a1 = lp_r_.a1 = a1;
-    lp_l_.a2 = lp_r_.a2 = a2;
+    design_lowpass(lp_cutoff, fs, 0.707f, b0, b1, b2, a1, a2);
+    assign(lp_l_, lp_r_, lp_m_);
 
-    design_lowshelf(settings_.bass_gain_db, 180.0f, fs, b0, b1, b2, a1, a2);
-    bass_l_.b0 = bass_r_.b0 = b0;
-    bass_l_.b1 = bass_r_.b1 = b1;
-    bass_l_.b2 = bass_r_.b2 = b2;
-    bass_l_.a1 = bass_r_.a1 = a1;
-    bass_l_.a2 = bass_r_.a2 = a2;
+    design_lowshelf(bass_db, 180.0f, fs, b0, b1, b2, a1, a2);
+    assign(bass_l_, bass_r_, bass_m_);
 
-    design_peaking(settings_.mid_gain_db, 1400.0f, fs, 1.0f, b0, b1, b2, a1, a2);
-    mid_l_.b0 = mid_r_.b0 = b0;
-    mid_l_.b1 = mid_r_.b1 = b1;
-    mid_l_.b2 = mid_r_.b2 = b2;
-    mid_l_.a1 = mid_r_.a1 = a1;
-    mid_l_.a2 = mid_r_.a2 = a2;
+    design_peaking(mid_db, 1400.0f, fs, 1.0f, b0, b1, b2, a1, a2);
+    assign(mid_l_, mid_r_, mid_m_);
 
     float treble_fc = std::min(6500.0f, fs * 0.4f);
-    design_highshelf(settings_.treble_gain_db, treble_fc, fs, b0, b1, b2, a1, a2);
-    treble_l_.b0 = treble_r_.b0 = b0;
-    treble_l_.b1 = treble_r_.b1 = b1;
-    treble_l_.b2 = treble_r_.b2 = b2;
-    treble_l_.a1 = treble_r_.a1 = a1;
-    treble_l_.a2 = treble_r_.a2 = a2;
+    design_highshelf(treble_db, treble_fc, fs, b0, b1, b2, a1, a2);
+    assign(treble_l_, treble_r_, treble_m_);
 }
+
+namespace {
+inline int16_t to_s16(float v) {
+    return static_cast<int16_t>(std::lrintf(std::clamp(v, -32768.0f, 32767.0f)));
+}
+} // namespace
+
+namespace {
+// RAII claim of the single-consumer processing slot.
+struct BusyGuard {
+    explicit BusyGuard(std::atomic<bool>& f) : flag(f), owns(!f.exchange(true, std::memory_order_acquire)) {}
+    ~BusyGuard() { if (owns) flag.store(false, std::memory_order_release); }
+    std::atomic<bool>& flag;
+    bool owns;
+};
+} // namespace
 
 void AudioDsp::process_stereo(int16_t* interleaved_samples, std::size_t frame_count, int sample_rate) {
     if (!settings_.enabled || !interleaved_samples || frame_count == 0) {
         return;
     }
+    BusyGuard guard(busy_);
+    if (!guard.owns) return;   // another thread is processing: leave this buffer untouched
 
-    if (sample_rate != last_sample_rate_) {
-        update_coefficients(sample_rate);
-    }
+    refresh_coefficients(sample_rate > 0 ? sample_rate : last_sample_rate_);
 
-    float width = settings_.stereo_width;
-    bool filter = settings_.anti_aliasing_filter;
-    bool limiter = settings_.limiter_enabled;
+    const float width = settings_.stereo_width;
+    const bool filter = settings_.anti_aliasing_filter;
+    const bool limiter = settings_.limiter_enabled;
 
     for (std::size_t i = 0; i < frame_count; ++i) {
         float l = static_cast<float>(interleaved_samples[i * 2]);
@@ -216,22 +245,32 @@ void AudioDsp::process_stereo(int16_t* interleaved_samples, std::size_t frame_co
             r = soft_limit(r);
         }
 
-        interleaved_samples[i * 2]     = static_cast<int16_t>(std::clamp(l, -32768.0f, 32767.0f));
-        interleaved_samples[i * 2 + 1] = static_cast<int16_t>(std::clamp(r, -32768.0f, 32767.0f));
+        interleaved_samples[i * 2]     = to_s16(l);
+        interleaved_samples[i * 2 + 1] = to_s16(r);
+    }
+}
+
+void AudioDsp::process_mono(int16_t* samples, std::size_t sample_count, int sample_rate) {
+    if (!settings_.enabled || !samples || sample_count == 0) {
+        return;
+    }
+    BusyGuard guard(busy_);
+    if (!guard.owns) return;
+
+    refresh_coefficients(sample_rate > 0 ? sample_rate : last_sample_rate_);
+
+    const bool filter = settings_.anti_aliasing_filter;
+    const bool limiter = settings_.limiter_enabled;
+
+    for (std::size_t i = 0; i < sample_count; ++i) {
+        float x = static_cast<float>(samples[i]);
+        if (filter) x = lp_m_.process(x);
+        x = bass_m_.process(x);
+        x = mid_m_.process(x);
+        x = treble_m_.process(x);
+        if (limiter) x = soft_limit(x);
+        samples[i] = to_s16(x);
     }
 }
 
 } // namespace gbaimp
-
-#include "gbaimp/audio_pipeline.h"
-
-namespace gbaimp {
-
-void process_audio_block(int16_t* interleaved, size_t sample_count) {
-    const int sample_rate = HdAudioPlayer::instance().settings().target_sample_rate;
-    HdAudioPlayer::instance().mix_audio(interleaved, sample_count, 2, sample_rate);
-    AudioDsp::instance().process_stereo(interleaved, sample_count / 2, sample_rate);
-}
-
-} // namespace gbaimp
-

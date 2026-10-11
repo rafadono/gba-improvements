@@ -40,6 +40,9 @@ struct HudZone {
 
 class HudAnchoring {
 public:
+    // Independently constructible (tests, multi-instance hosts); instance() stays the shared default.
+    HudAnchoring() = default;
+
     static HudAnchoring& instance();
 
     const HudAnchorSettings& settings() const { return settings_; }
@@ -60,7 +63,6 @@ public:
     void process_oam_entry(uint16_t& attr0, uint16_t& attr1);
 
 private:
-    HudAnchoring() = default;
 
     HudAnchorSettings settings_;
     std::vector<HudZone> zones_;

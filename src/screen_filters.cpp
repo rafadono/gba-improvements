@@ -6,6 +6,19 @@
 
 namespace gbaimp {
 
+namespace {
+
+// The MiSTer-style profiles are expressed as a ratio: exponent = target gamma /
+// assumed display gamma. The display is assumed to already be a 2.2 gamma
+// device, so a "2.2" target needs no correction (exponent 1.0, identity LUT)
+// and "1.6" brightens mid-tones (exponent 1.6/2.2). MisterGamma22 being an
+// identity mapping is therefore intentional; do not "fix" it.
+constexpr float kMisterDisplayGamma = 2.2f;
+constexpr float kMisterTargetGamma16 = 1.6f;
+constexpr float kMisterTargetGamma22 = 2.2f;
+
+} // namespace
+
 ScreenFilters& ScreenFilters::instance() {
     static ScreenFilters s_instance;
     return s_instance;
@@ -72,13 +85,14 @@ void ScreenFilters::generate_lut(ColorProfile profile) {
         }
         case ColorProfile::MisterGamma16: {
             // MiSTer FPGA GBA 1.6 gamma mapping
-            float gamma_corrected = std::pow(norm, 1.6f / 2.2f);
+            float gamma_corrected = std::pow(norm, kMisterTargetGamma16 / kMisterDisplayGamma);
             r = g = b = gamma_corrected;
             break;
         }
         case ColorProfile::MisterGamma22: {
-            // MiSTer FPGA GBA 2.2 gamma mapping
-            float gamma_corrected = std::pow(norm, 2.2f / 2.2f);
+            // MiSTer FPGA GBA 2.2 gamma mapping: target == display gamma, so
+            // the exponent is exactly 1.0 and the LUT is an identity.
+            float gamma_corrected = std::pow(norm, kMisterTargetGamma22 / kMisterDisplayGamma);
             r = g = b = gamma_corrected;
             break;
         }

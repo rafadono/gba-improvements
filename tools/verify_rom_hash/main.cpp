@@ -1,47 +1,64 @@
+// verify_rom_hash <rom> <expected_sha1>
+// Exit codes: 0 = match, 1 = mismatch, 2 = usage or I/O error.
+#include <cctype>
 #include <cstdio>
-#include <fstream>
-#include <vector>
 #include <string>
-#include "gba/sha1.h"
+
+#include "sha1.h"
 
 namespace {
-// Expected hash is passed on the command line (argv[2]).
+
+std::string normalize_hex(const char* s) {
+    std::string out;
+    for (; *s; ++s) out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*s))));
+    return out;
 }
 
+} // namespace
+
 int main(int argc, char** argv) {
-    if (argc < 3) {
-        std::printf("Usage: %s <path_to_rom.gba> <expected_sha1>\n", argv[0]);
-        return 1;
+    if (argc != 3) {
+        std::fprintf(stderr, "Usage: %s <file> <expected_sha1_hex>\n", argc > 0 ? argv[0] : "verify_rom_hash");
+        return 2;
     }
 
     const char* path = argv[1];
-    const char* EXPECTED_SHA1 = argv[2];
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-        std::fprintf(stderr, "Error: Could not open ROM file: %s\n", path);
-        return 1;
-    }
-
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-
-    std::vector<uint8_t> buffer(static_cast<size_t>(size));
-    if (!file.read(reinterpret_cast<char*>(buffer.data()), size)) {
-        std::fprintf(stderr, "Error: Failed reading ROM file: %s\n", path);
-        return 1;
-    }
-
-    std::string calculated_hash = gba::sha1(buffer.data(), buffer.size()).hex();
-    std::printf("ROM: %s\n", path);
-    std::printf("Size: %zu bytes\n", buffer.size());
-    std::printf("Calculated SHA-1: %s\n", calculated_hash.c_str());
-    std::printf("Expected SHA-1:   %s\n", EXPECTED_SHA1);
-
-    if (calculated_hash == std::string(EXPECTED_SHA1)) {
-        std::printf("Result: Verification successful.\n");
-        return 0;
-    } else {
-        std::fprintf(stderr, "Result: Hash verification failed.\n");
+    const std::string expected = normalize_hex(argv[2]);
+    if (expected.size() != 40 || expected.find_first_not_of("0123456789abcdef") != std::string::npos) {
+        std::fprintf(stderr, "Error: expected hash must be 40 hexadecimal characters.\n");
         return 2;
     }
+
+    std::FILE* f = std::fopen(path, "rb");
+    if (!f) {
+        std::fprintf(stderr, "Error: could not open file: %s\n", path);
+        return 2;
+    }
+
+    gbaimp_tools::Sha1 sha;
+    unsigned char chunk[64 * 1024];
+    unsigned long long total = 0;
+    std::size_t n;
+    while ((n = std::fread(chunk, 1, sizeof chunk, f)) > 0) {
+        sha.update(chunk, n);
+        total += n;
+    }
+    const bool io_error = std::ferror(f) != 0;
+    std::fclose(f);
+    if (io_error) {
+        std::fprintf(stderr, "Error: failed while reading file: %s\n", path);
+        return 2;
+    }
+
+    const std::string actual = sha.hex_digest();
+    std::printf("File: %s\n", path);
+    std::printf("Size: %llu bytes\n", total);
+    std::printf("Calculated SHA-1: %s\n", actual.c_str());
+    std::printf("Expected SHA-1:   %s\n", expected.c_str());
+    if (actual == expected) {
+        std::printf("Result: match.\n");
+        return 0;
+    }
+    std::fprintf(stderr, "Result: MISMATCH.\n");
+    return 1;
 }

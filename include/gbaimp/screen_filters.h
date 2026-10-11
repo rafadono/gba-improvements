@@ -37,6 +37,12 @@ struct ScreenFilterSettings {
 
 class ScreenFilters {
 public:
+    // Independently constructible (tests, multi-instance hosts); instance() stays the shared default.
+    ScreenFilters();
+    ~ScreenFilters();
+    ScreenFilters(const ScreenFilters&) = delete;
+    ScreenFilters& operator=(const ScreenFilters&) = delete;
+
     static ScreenFilters& instance();
 
     const ScreenFilterSettings& settings() const { return settings_; }
@@ -50,8 +56,6 @@ public:
     void render_mask(SDL_Renderer* renderer, const SDL_Rect* viewport, int game_w, int game_h);
 
 private:
-    ScreenFilters();
-    ~ScreenFilters();
 
     void generate_lut(ColorProfile profile);
     void ensure_mask_texture(SDL_Renderer* renderer, ScreenMaskType type, int dest_w, int dest_h, int game_w, int game_h);

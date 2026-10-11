@@ -6,6 +6,9 @@ namespace gbaimp {
 
 class DialogTurbo {
 public:
+    // Independently constructible (tests, multi-instance hosts); instance() stays the shared default.
+    DialogTurbo() = default;
+
     static DialogTurbo& instance();
 
     void set_enabled(bool enable);
@@ -21,7 +24,6 @@ public:
     uint16_t process_keyinput(uint16_t keyinput, uint64_t frame_index);
 
 private:
-    DialogTurbo() = default;
 
     bool enabled_ = true;
     bool held_ = false;

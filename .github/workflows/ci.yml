@@ -4,8 +4,18 @@ on:
   push:
   pull_request:
 
+env:
+  # Windows: official SDL2 "VC" development package (prebuilt import lib + DLL).
+  # Chosen over `vcpkg install sdl2` because it needs no compilation (faster, no
+  # dependency on the runner's vcpkg baseline). The hash pins the exact archive.
+  SDL2_VERSION: 2.30.12
+  SDL2_VC_SHA256: 1ca980f9964fb44cf94be235c9818fa1dc8e3f76b08096d751b2d689e5e37d02
+  SDL_VIDEODRIVER: dummy
+  SDL_AUDIODRIVER: dummy
+
 jobs:
-  build-and-test:
+  linux:
+    name: ubuntu-latest (GCC)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,11 +24,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build g++ libsdl2-dev
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGBAIMP_BUILD_TESTS=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build
       - name: Test
         run: ctest --test-dir build --output-on-failure
-        env:
-          SDL_VIDEODRIVER: dummy
-          SDL_AUDIODRIVER: dummy
+
+  windows:
+    name: windows-latest (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch SDL2 development package
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "sdl2-vc.zip"
+          $url = "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL2_VERSION/SDL2-devel-$env:SDL2_VERSION-VC.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          if ($hash -ne $env:SDL2_VC_SHA256) { throw "SDL2 archive hash mismatch: $hash" }
+          Expand-Archive -Path $zip -DestinationPath (Join-Path $env:RUNNER_TEMP "sdl2")
+          $root = Join-Path $env:RUNNER_TEMP "sdl2\SDL2-$env:SDL2_VERSION"
+          "SDL2_ROOT=$root" >> $env:GITHUB_ENV
+          # SDL2.dll must be findable by the test executables at run time.
+          "$root\lib\x64" >> $env:GITHUB_PATH
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -A x64 "-DSDL2_DIR=$env:SDL2_ROOT/cmake"
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

@@ -17,6 +17,9 @@ struct SavestateMetadata {
 
 class SavestateThumbnailManager {
 public:
+    // Independently constructible (tests, multi-instance hosts); instance() stays the shared default.
+    SavestateThumbnailManager();
+
     static SavestateThumbnailManager& instance();
 
     void capture_thumbnail(int slot, const uint32_t* rgba_pixels, int width, int height);
@@ -28,7 +31,6 @@ public:
     const std::string& base_directory() const { return base_dir_; }
 
 private:
-    SavestateThumbnailManager();
     void ensure_save_directory();
 
     std::string base_dir_ = "saves/thumbnails";

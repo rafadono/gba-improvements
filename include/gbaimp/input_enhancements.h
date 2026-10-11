@@ -55,6 +55,8 @@ enum class PadButtonChoice : int {
     RightTrigger = 7
 };
 
+class DialogTurbo;
+
 struct InputEnhancementSettings {
     AnalogMode analog_mode = AnalogMode::AnalogWalkRun;
     float deadzone = 0.18f;
@@ -65,6 +67,11 @@ struct InputEnhancementSettings {
     PadButtonChoice pad_b = PadButtonChoice::ButtonB;
     PadButtonChoice pad_l = PadButtonChoice::LeftBumper;
     PadButtonChoice pad_r = PadButtonChoice::RightBumper;
+
+    // Dialog turbo hold input (persisted in the [turbo] section of the keybinds file).
+    // SDL_SCANCODE_UNKNOWN disables the keyboard trigger.
+    SDL_Scancode turbo_key = SDL_SCANCODE_TAB;
+    PadButtonChoice turbo_pad = PadButtonChoice::ButtonY;
 
     KeyboardPreset kb_preset = KeyboardPreset::Default;
     std::array<SDL_Scancode, KEY_COUNT> key_scancodes = {
@@ -83,6 +90,16 @@ struct InputEnhancementSettings {
 
 class InputEnhancements {
 public:
+    // Independently constructible (tests, multi-instance hosts); instance() stays the shared default.
+    // Loads the default keybinds file ("keybinds.ini" in the working directory) if present.
+    InputEnhancements();
+    // Same, but the given file is both the initial load source and the configured keybinds path.
+    explicit InputEnhancements(const std::string& keybinds_path);
+    ~InputEnhancements();
+    // Owns a controller handle and per-frame cache: not copyable.
+    InputEnhancements(const InputEnhancements&) = delete;
+    InputEnhancements& operator=(const InputEnhancements&) = delete;
+
     static InputEnhancements& instance();
 
     const InputEnhancementSettings& settings() const { return settings_; }
@@ -106,9 +123,25 @@ public:
     void set_pad_l(int choice);
     void set_pad_r(int choice);
 
-    // Persistence
-    void load_keybinds(const char* path = "keybinds.ini");
-    void save_keybinds(const char* path = "keybinds.ini") const;
+    // Dialog turbo trigger (defaults: Tab / pad button Y).
+    void set_turbo_key(SDL_Scancode sc);
+    bool set_turbo_key_from_name(const char* name);   // false if the name is unknown
+    void set_turbo_pad(int choice);                   // PadButtonChoice value, clamped to 0..7
+
+    // The DialogTurbo driven by process_keyinput(). nullptr (default) means
+    // DialogTurbo::instance(). Hosts normally never call this; tests inject their own.
+    void set_dialog_turbo(DialogTurbo* turbo) { turbo_ = turbo; }
+    DialogTurbo& dialog_turbo();
+
+    // Persistence. A null path means the configured keybinds path (default "keybinds.ini").
+    void load_keybinds(const char* path = nullptr);
+    void save_keybinds(const char* path = nullptr) const;
+    void set_keybinds_path(const std::string& path);
+    const std::string& keybinds_path() const { return keybinds_path_; }
+    // When true (default, matches historical behavior) apply_keyboard_preset() and
+    // reset_keyboard_defaults() write the keybinds file as a side effect.
+    void set_autosave_keybinds(bool enable) { autosave_keybinds_ = enable; }
+    bool autosave_keybinds() const { return autosave_keybinds_; }
     void reset_to_defaults();
     void reset_gamepad_defaults();
     void reset_keyboard_defaults();
@@ -120,11 +153,21 @@ public:
     static SDL_Scancode scancode_from_string(const char* name);
 
 private:
-    InputEnhancements();
-
     InputEnhancementSettings settings_;
     uint32_t walk_frame_counter_ = 0;
     uint64_t turbo_frame_counter_ = 0;
+
+    std::string keybinds_path_ = "keybinds.ini";
+    bool autosave_keybinds_ = true;
+    DialogTurbo* turbo_ = nullptr;
+
+    // process_keyinput() per-frame cache and controller handle (per instance)
+    uint64_t last_frame_ = ~0ULL;
+    uint16_t last_host_keys_ = 0xFFFFu;
+    uint16_t cached_keys_ = 0x03FFu;
+    uint64_t fallback_frame_ = 0;
+    SDL_GameController* pad_ = nullptr;
+    uint32_t last_joy_detect_ms_ = 0;
 };
 
 } // namespace gbaimp

@@ -1,5 +1,6 @@
 #include "test_harness.h"
 #include "gbaimp/hd_audio_player.h"
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <vector>
@@ -19,6 +20,22 @@ static void write_wav(const std::string& path, int rate, int frames_on, int fram
     for (int i = 0; i < frames; ++i) {
         int16_t s = (i < frames_on) ? value : 0;
         u16(uint16_t(s)); u16(uint16_t(s));
+    }
+}
+
+// 16-bit stereo PCM WAV with distinct channel values: `frames_on` frames of (l, r), then silence.
+static void write_wav_lr(const std::string& path, int rate, int frames_on, int frames_off, int16_t l, int16_t r) {
+    const int frames = frames_on + frames_off;
+    const uint32_t data_bytes = uint32_t(frames) * 4;
+    std::ofstream f(path, std::ios::binary);
+    auto u32 = [&](uint32_t v) { f.write(reinterpret_cast<const char*>(&v), 4); };
+    auto u16 = [&](uint16_t v) { f.write(reinterpret_cast<const char*>(&v), 2); };
+    f.write("RIFF", 4); u32(36 + data_bytes); f.write("WAVE", 4);
+    f.write("fmt ", 4); u32(16); u16(1); u16(2); u32(uint32_t(rate)); u32(uint32_t(rate) * 4); u16(4); u16(16);
+    f.write("data", 4); u32(data_bytes);
+    for (int i = 0; i < frames; ++i) {
+        const bool on = i < frames_on;
+        u16(uint16_t(on ? l : 0)); u16(uint16_t(on ? r : 0));
     }
 }
 
@@ -125,6 +142,128 @@ int main() {
 
     // Null buffer is safe.
     hd.mix_audio(nullptr, 100, 2, 32768);
+
+    // ---------------------------------------------------------------------------------
+    // Mono device buffers and device-rate handling (independent instance)
+    // ---------------------------------------------------------------------------------
+    {
+        const std::string wav_lr = tmp.file("lr.wav");
+        write_wav_lr(wav_lr, 32768, 100, 100, 10000, 2000);   // L=10000, R=2000, then silence
+        const std::string ini2 = tmp.file("tracks2.ini");
+        { std::ofstream f(ini2); f << "[tracks]\n3 = " << wav_lr << "\n"; }
+
+        auto loud_count = [](const std::vector<int16_t>& v, int16_t lo) {
+            size_t n = 0;
+            for (int16_t s : v) if (s >= lo) ++n;
+            return n;
+        };
+
+        HdAudioPlayer h;
+        h.set_bgm_volume(1.0f);                      // default is 0.85
+        h.settings().target_sample_rate = 32768;
+        h.load_track_mapping(ini2);
+        h.trigger_song(3);
+
+        // Stereo at the track rate: L and R keep their own values.
+        {
+            std::vector<int16_t> buf(2 * 20, 0);
+            h.mix_audio(buf.data(), buf.size(), 2, 32768);
+            CHECK_EQ(int(buf[0]), 10000);
+            CHECK_EQ(int(buf[1]), 2000);
+            CHECK_EQ(int(buf[38]), 10000);
+            CHECK_EQ(int(buf[39]), 2000);
+        }
+
+        // Mono: the stereo track is folded down ((L+R)/2 = 6000) and advances one track
+        // frame per mono sample (the first 20 frames were consumed above).
+        h.stop_music();
+        h.trigger_song(3);
+        {
+            std::vector<int16_t> buf(150, 0);
+            h.mix_audio(buf.data(), buf.size(), 1, 32768);
+            CHECK_EQ(int(buf[0]), 6000);
+            CHECK_EQ(int(buf[99]), 6000);
+            CHECK_EQ(int(buf[100]), 0);                 // track frame 100 is silence
+            CHECK_EQ(int(buf[149]), 0);
+            CHECK_EQ(loud_count(buf, 5000), size_t(100));
+        }
+
+        // Mono keeps the native signal and adds the HD fold-down to it.
+        h.stop_music();
+        h.trigger_song(3);
+        {
+            std::vector<int16_t> buf(8, 1000);
+            h.mix_audio(buf.data(), buf.size(), 1, 32768);
+            for (int16_t s : buf) CHECK_EQ(int(s), 7000);
+        }
+
+        // A device rate twice the track rate plays it at half speed (twice as many samples).
+        h.stop_music();
+        h.trigger_song(3);
+        {
+            std::vector<int16_t> buf(260, 0);
+            h.mix_audio(buf.data(), buf.size(), 1, 65536);
+            CHECK(std::abs(int(loud_count(buf, 5000)) - 200) <= 3);
+        }
+        // Half the track rate plays it at double speed.
+        h.stop_music();
+        h.trigger_song(3);
+        {
+            std::vector<int16_t> buf(90, 0);
+            h.mix_audio(buf.data(), buf.size(), 1, 16384);
+            CHECK(std::abs(int(loud_count(buf, 5000)) - 50) <= 3);
+        }
+        // The same applies to stereo buffers.
+        h.stop_music();
+        h.trigger_song(3);
+        {
+            std::vector<int16_t> buf(2 * 260, 0);
+            h.mix_audio(buf.data(), buf.size(), 2, 65536);
+            size_t n = 0;
+            for (size_t f = 0; f < 260; ++f) if (buf[f * 2] >= 9000) ++n;
+            CHECK(std::abs(int(n)) >= 197 && n <= 203);
+            CHECK(buf[1] >= 1990 && buf[1] <= 2010);
+        }
+
+        // Playback position is continuous across calls (no restart per block).
+        h.stop_music();
+        h.trigger_song(3);
+        {
+            std::vector<int16_t> a(60, 0), b(60, 0);
+            h.mix_audio(a.data(), a.size(), 1, 32768);
+            h.mix_audio(b.data(), b.size(), 1, 32768);
+            CHECK_EQ(int(a[59]), 6000);
+            CHECK_EQ(int(b[39]), 6000);                 // frame 99
+            CHECK_EQ(int(b[40]), 0);                    // frame 100
+        }
+
+        // Unsupported channel counts only get the volume scaling, never HD audio.
+        h.stop_music();
+        h.trigger_song(3);
+        {
+            std::vector<int16_t> buf(12, 100);
+            h.mix_audio(buf.data(), buf.size(), 6, 32768);
+            for (int16_t s : buf) CHECK_EQ(int(s), 100);
+        }
+
+        // Odd trailing sample in a stereo buffer is left alone.
+        h.stop_music();
+        h.trigger_song(3);
+        {
+            std::vector<int16_t> buf(5, 0);
+            h.mix_audio(buf.data(), buf.size(), 2, 32768);
+            CHECK_EQ(int(buf[4]), 0);
+        }
+
+        // A nonsense device rate falls back to the track rate instead of misbehaving.
+        h.stop_music();
+        h.trigger_song(3);
+        {
+            std::vector<int16_t> buf(10, 0);
+            h.mix_audio(buf.data(), buf.size(), 1, 0);
+            CHECK_EQ(int(buf[0]), 6000);
+        }
+    }
 
     return testh::finish("hd_audio_player");
 }

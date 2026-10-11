@@ -12,7 +12,7 @@ the command line. Hex values accept `0x...`. Defaults resolve relative to
 | `audit_code_coverage.py` | Detect function prologues in the ROM, compare to known symbols and write a Markdown coverage report. |
 | `gen_ram_dispatch.py` | Generate a native IWRAM/EWRAM dispatcher (`ram_overlay_dispatch.h/.cpp`) from cached recompiler `.c` output. |
 | `gen_symbols.py` | Extract `task_*`/`mode_*` function symbols from the ROM's debug descriptor tables. |
-| `verify_rom_hash/` | C++ tool that checks a ROM's SHA-1 against an expected value. |
+| `verify_rom_hash/` | Self-contained C++ tool (built by CMake with `GBAIMP_BUILD_TOOLS`, ON for a top-level build, OFF as a subproject): `verify_rom_hash <rom> <expected_sha1>`; exit 0 match, 1 mismatch, 2 usage/IO error. Its tests (`verify_rom_hash_sha1_vectors`, `verify_rom_hash_cli`) run under `ctest`. |
 
 ## Examples
 
@@ -26,7 +26,7 @@ python tools/gen_symbols.py roms/game.gba -o symbols/task_mode_symbols.txt
 
 ## Options
 
-Common: `--root`, `--rom`, `--rom-base` (default `0x08000000`).
+Shared: `--root` (all scripts except `gen_symbols.py`), `--rom` / `--rom-base` (default `0x08000000`; not in `gen_ram_dispatch.py`).
 
 - `trace_control_flow.py`: `--rom` (required), `--code-limit` (`0x08140000`), `--entry-point` (`0x080000C0`), `--seeds`, `-o/--output`.
 - `merge_coverage_toml.py`: `--toml` (`<root>/config/recomp.toml`), `--symbols-dir`, `--cache-dir`, `--rom`, `--prologue-scan-limit` (`0x140000`), `--target` (`3650`).

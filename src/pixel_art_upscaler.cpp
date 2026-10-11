@@ -1,6 +1,7 @@
-#include "gbaimp/xbrz_filter.h"
+#include "gbaimp/pixel_art_upscaler.h"
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
 
 namespace gbaimp {
 
@@ -52,16 +53,16 @@ inline uint32_t sample_clamped(const uint32_t* src, int x, int y, int w, int h) 
 
 } // namespace
 
-XbrzUpscaler& XbrzUpscaler::instance() {
-    static XbrzUpscaler s_instance;
+PixelArtUpscaler& PixelArtUpscaler::instance() {
+    static PixelArtUpscaler s_instance;
     return s_instance;
 }
 
-void XbrzUpscaler::set_scale(XbrzScale scale) {
+void PixelArtUpscaler::set_scale(UpscaleScale scale) {
     current_scale_ = scale;
 }
 
-void XbrzUpscaler::scale_2x(const uint32_t* src, uint32_t* dst, int w, int h) {
+void PixelArtUpscaler::scale_2x(const uint32_t* src, uint32_t* dst, int w, int h) {
     int out_w = w * 2;
 
     for (int y = 0; y < h; ++y) {
@@ -108,7 +109,7 @@ void XbrzUpscaler::scale_2x(const uint32_t* src, uint32_t* dst, int w, int h) {
     }
 }
 
-void XbrzUpscaler::scale_3x(const uint32_t* src, uint32_t* dst, int w, int h) {
+void PixelArtUpscaler::scale_3x(const uint32_t* src, uint32_t* dst, int w, int h) {
     int out_w = w * 3;
 
     for (int y = 0; y < h; ++y) {
@@ -136,13 +137,13 @@ void XbrzUpscaler::scale_3x(const uint32_t* src, uint32_t* dst, int w, int h) {
     }
 }
 
-void XbrzUpscaler::scale_4x(const uint32_t* src, uint32_t* dst, int w, int h) {
+void PixelArtUpscaler::scale_4x(const uint32_t* src, uint32_t* dst, int w, int h) {
     std::vector<uint32_t> intermediate(w * 2 * h * 2);
     scale_2x(src, intermediate.data(), w, h);
     scale_2x(intermediate.data(), dst, w * 2, h * 2);
 }
 
-void XbrzUpscaler::scale_5x(const uint32_t* src, uint32_t* dst, int w, int h) {
+void PixelArtUpscaler::scale_5x(const uint32_t* src, uint32_t* dst, int w, int h) {
     int out_w = w * 5;
 
     for (int y = 0; y < h; ++y) {
@@ -186,12 +187,23 @@ void XbrzUpscaler::scale_5x(const uint32_t* src, uint32_t* dst, int w, int h) {
     }
 }
 
-void XbrzUpscaler::process(const uint32_t* src, int src_width, int src_height,
+void PixelArtUpscaler::process(const uint32_t* src, int src_width, int src_height,
                            std::vector<uint32_t>& dst_buffer, int& out_width, int& out_height) {
-    if (current_scale_ == XbrzScale::None || !src) {
+    // Invalid input (null source, non-positive size, or an output that would not
+    // fit the int pixel indexing used by the scalers): produce an empty result.
+    const int64_t factor64 = static_cast<int64_t>(current_scale_);
+    if (!src || src_width <= 0 || src_height <= 0 ||
+        static_cast<int64_t>(src_width) * src_height * factor64 * factor64 > INT32_MAX) {
+        dst_buffer.clear();
+        out_width = 0;
+        out_height = 0;
+        return;
+    }
+
+    if (current_scale_ == UpscaleScale::None) {
         out_width = src_width;
         out_height = src_height;
-        dst_buffer.assign(src, src + src_width * src_height);
+        dst_buffer.assign(src, src + static_cast<size_t>(src_width) * src_height);
         return;
     }
 
@@ -201,16 +213,16 @@ void XbrzUpscaler::process(const uint32_t* src, int src_width, int src_height,
     dst_buffer.resize(out_width * out_height);
 
     switch (current_scale_) {
-        case XbrzScale::Xbrz2x:
+        case UpscaleScale::X2:
             scale_2x(src, dst_buffer.data(), src_width, src_height);
             break;
-        case XbrzScale::Xbrz3x:
+        case UpscaleScale::X3:
             scale_3x(src, dst_buffer.data(), src_width, src_height);
             break;
-        case XbrzScale::Xbrz4x:
+        case UpscaleScale::X4:
             scale_4x(src, dst_buffer.data(), src_width, src_height);
             break;
-        case XbrzScale::Xbrz5x:
+        case UpscaleScale::X5:
             scale_5x(src, dst_buffer.data(), src_width, src_height);
             break;
         default:

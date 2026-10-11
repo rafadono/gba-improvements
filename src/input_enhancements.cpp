@@ -45,7 +45,24 @@ InputEnhancements& InputEnhancements::instance() {
 }
 
 InputEnhancements::InputEnhancements() {
-    load_keybinds("keybinds.ini");
+    load_keybinds();
+}
+
+InputEnhancements::InputEnhancements(const std::string& keybinds_path)
+    : keybinds_path_(keybinds_path.empty() ? std::string("keybinds.ini") : keybinds_path) {
+    load_keybinds();
+}
+
+InputEnhancements::~InputEnhancements() {
+    // The host may already have shut SDL down (singleton destroyed at exit).
+    if (pad_ && SDL_WasInit(SDL_INIT_GAMECONTROLLER)) {
+        SDL_GameControllerClose(pad_);
+    }
+    pad_ = nullptr;
+}
+
+void InputEnhancements::set_keybinds_path(const std::string& path) {
+    keybinds_path_ = path.empty() ? std::string("keybinds.ini") : path;
 }
 
 void InputEnhancements::set_analog_mode(AnalogMode mode) {
@@ -217,7 +234,7 @@ void InputEnhancements::apply_keyboard_preset(KeyboardPreset preset) {
         default:
             break;
     }
-    save_keybinds();
+    if (autosave_keybinds_) save_keybinds();
 }
 
 void InputEnhancements::apply_gamepad_profile(GamepadProfile profile) {
@@ -279,14 +296,36 @@ void InputEnhancements::set_pad_r(int choice) {
     settings_.gamepad_profile = GamepadProfile::Custom;
 }
 
+void InputEnhancements::set_turbo_key(SDL_Scancode sc) {
+    settings_.turbo_key = sc;
+}
+
+bool InputEnhancements::set_turbo_key_from_name(const char* name) {
+    if (!name || !*name) return false;
+    if (SDL_strcasecmp(name, "none") == 0) {
+        settings_.turbo_key = SDL_SCANCODE_UNKNOWN;
+        return true;
+    }
+    SDL_Scancode sc = scancode_from_string(name);
+    if (sc == SDL_SCANCODE_UNKNOWN) return false;
+    settings_.turbo_key = sc;
+    return true;
+}
+
+void InputEnhancements::set_turbo_pad(int choice) {
+    settings_.turbo_pad = static_cast<PadButtonChoice>(std::clamp(choice, 0, 7));
+}
+
+DialogTurbo& InputEnhancements::dialog_turbo() {
+    return turbo_ ? *turbo_ : DialogTurbo::instance();
+}
+
 void InputEnhancements::load_keybinds(const char* path) {
-    std::FILE* f = std::fopen(path ? path : "keybinds.ini", "r");
+    std::FILE* f = std::fopen(path ? path : keybinds_path_.c_str(), "r");
     if (!f) return;
     char line[256];
     bool in_player1 = false;
-    bool in_gamepad = false;
-    bool have_profile = false;
-    GamepadProfile file_profile = GamepadProfile::Standard;
+    bool in_turbo = false;
     while (std::fgets(line, sizeof(line), f)) {
         char* s = line;
         while (*s == ' ' || *s == '\t') ++s;
@@ -297,10 +336,10 @@ void InputEnhancements::load_keybinds(const char* path) {
         if (!*s || *s == '#' || *s == ';') continue;
         if (*s == '[') {
             in_player1 = (SDL_strcasecmp(s, "[player1]") == 0);
-            in_gamepad = (SDL_strcasecmp(s, "[gamepad]") == 0);
+            in_turbo = (SDL_strcasecmp(s, "[turbo]") == 0);
             continue;
         }
-        if (!in_player1 && !in_gamepad) continue;
+        if (!in_player1 && !in_turbo) continue;
         char* eq = std::strchr(s, '=');
         if (!eq) continue;
         *eq = '\0';
@@ -310,20 +349,9 @@ void InputEnhancements::load_keybinds(const char* path) {
             k[std::strlen(k)-1] = '\0';
         }
         while (*v == ' ' || *v == '\t') ++v;
-        if (in_gamepad) {
-            const int val = std::clamp(std::atoi(v), 0, 7);
-            if (SDL_strcasecmp(k, "profile") == 0) {
-                file_profile = static_cast<GamepadProfile>(std::clamp(std::atoi(v), 0, 5));
-                have_profile = true;
-            }
-            else if (SDL_strcasecmp(k, "pad_a") == 0)
-                settings_.pad_a = static_cast<PadButtonChoice>(val);
-            else if (SDL_strcasecmp(k, "pad_b") == 0)
-                settings_.pad_b = static_cast<PadButtonChoice>(val);
-            else if (SDL_strcasecmp(k, "pad_l") == 0)
-                settings_.pad_l = static_cast<PadButtonChoice>(val);
-            else if (SDL_strcasecmp(k, "pad_r") == 0)
-                settings_.pad_r = static_cast<PadButtonChoice>(val);
+        if (in_turbo) {
+            if (SDL_strcasecmp(k, "key") == 0) set_turbo_key_from_name(v);
+            else if (SDL_strcasecmp(k, "pad") == 0) set_turbo_pad(std::atoi(v));
             continue;
         }
         GbaKeyIndex idx = key_index_from_name(k);
@@ -333,17 +361,10 @@ void InputEnhancements::load_keybinds(const char* path) {
     }
     std::fclose(f);
 
-    if (have_profile) {
-        if (file_profile == GamepadProfile::Custom) {
-            settings_.gamepad_profile = GamepadProfile::Custom;
-        } else {
-            apply_gamepad_profile(file_profile);
-        }
-    }
 }
 
 void InputEnhancements::save_keybinds(const char* path) const {
-    std::ofstream f(path ? path : "keybinds.ini");
+    std::ofstream f(path ? path : keybinds_path_.c_str());
     if (!f.is_open()) return;
     f << "[player1]\n";
     f << "A = " << get_key_name(KEY_A) << "\n";
@@ -356,12 +377,10 @@ void InputEnhancements::save_keybinds(const char* path) const {
     f << "Down = " << get_key_name(KEY_DOWN) << "\n";
     f << "R = " << get_key_name(KEY_R) << "\n";
     f << "L = " << get_key_name(KEY_L) << "\n";
-    f << "\n[gamepad]\n";
-    f << "profile = " << static_cast<int>(settings_.gamepad_profile) << "\n";
-    f << "pad_a = " << static_cast<int>(settings_.pad_a) << "\n";
-    f << "pad_b = " << static_cast<int>(settings_.pad_b) << "\n";
-    f << "pad_l = " << static_cast<int>(settings_.pad_l) << "\n";
-    f << "pad_r = " << static_cast<int>(settings_.pad_r) << "\n";
+    const char* tn = SDL_GetScancodeName(settings_.turbo_key);
+    f << "\n[turbo]\n";
+    f << "key = " << ((tn && *tn) ? tn : "None") << "\n";
+    f << "pad = " << static_cast<int>(settings_.turbo_pad) << "\n";
 }
 
 void InputEnhancements::reset_gamepad_defaults() {
@@ -372,12 +391,16 @@ void InputEnhancements::reset_gamepad_defaults() {
 
 void InputEnhancements::reset_keyboard_defaults() {
     apply_keyboard_preset(KeyboardPreset::Default);
-    save_keybinds();
+    if (autosave_keybinds_) save_keybinds();
 }
 
 void InputEnhancements::reset_to_defaults() {
     reset_gamepad_defaults();
     reset_keyboard_defaults();
+    // Bindings changed: drop the per-frame input cache so the next poll recomputes.
+    last_frame_ = ~0ULL;
+    last_host_keys_ = 0xFFFFu;
+    cached_keys_ = 0x03FFu;
 }
 
 void InputEnhancements::process_axis_input(int16_t axis_x, int16_t axis_y, uint16_t& keyinput) {
@@ -441,17 +464,13 @@ void InputEnhancements::process_axis_input(int16_t axis_x, int16_t axis_y, uint1
 
 uint16_t InputEnhancements::process_keyinput(uint16_t host_keys) {
     if (input_blocked()) {
+        dialog_turbo().set_held(false);
         return 0x03FFu;
     }
 
-    static uint64_t s_last_frame = ~0ULL;
-    static uint16_t s_last_host_keys = 0xFFFFu;
-    static uint16_t s_cached_keys = 0x03FFu;
-
-    static uint64_t s_fallback_frame = 0;
-    const uint64_t current_frame = hooks().frame_counter ? hooks().frame_counter() : ++s_fallback_frame;
-    if (current_frame == s_last_frame && host_keys == s_last_host_keys) {
-        return s_cached_keys;
+    const uint64_t current_frame = hooks().frame_counter ? hooks().frame_counter() : ++fallback_frame_;
+    if (current_frame == last_frame_ && host_keys == last_host_keys_) {
+        return cached_keys_;
     }
 
     uint16_t keys = 0x03FFu;
@@ -468,57 +487,57 @@ uint16_t InputEnhancements::process_keyinput(uint16_t host_keys) {
     }
 
     // 2. Controller processing: rate-limit joystick detection if none is attached
-    static SDL_GameController* s_pad = nullptr;
-    static uint32_t s_last_joy_detect_ms = 0;
-    if (!s_pad || !SDL_GameControllerGetAttached(s_pad)) {
-        if (s_pad) {
-            SDL_GameControllerClose(s_pad);
-            s_pad = nullptr;
+    if (!pad_ || !SDL_GameControllerGetAttached(pad_)) {
+        if (pad_) {
+            SDL_GameControllerClose(pad_);
+            pad_ = nullptr;
         }
         uint32_t now = SDL_GetTicks();
-        if (now - s_last_joy_detect_ms >= 2000) {
-            s_last_joy_detect_ms = now;
+        if (now - last_joy_detect_ms_ >= 2000) {
+            last_joy_detect_ms_ = now;
             int num_joysticks = SDL_NumJoysticks();
             for (int i = 0; i < num_joysticks; ++i) {
                 if (SDL_IsGameController(i)) {
-                    s_pad = SDL_GameControllerOpen(i);
-                    if (s_pad) break;
+                    pad_ = SDL_GameControllerOpen(i);
+                    if (pad_) break;
                 }
             }
         }
     }
 
-    if (s_pad) {
-        if (is_pad_button_pressed(s_pad, settings_.pad_a)) keys &= ~(1u << KEY_A);
-        if (is_pad_button_pressed(s_pad, settings_.pad_b)) keys &= ~(1u << KEY_B);
-        if (SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_BACK)) keys &= ~(1u << KEY_SELECT);
-        if (SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_START)) keys &= ~(1u << KEY_START);
-        if (SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) keys &= ~(1u << KEY_RIGHT);
-        if (SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) keys &= ~(1u << KEY_LEFT);
-        if (SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_DPAD_UP)) keys &= ~(1u << KEY_UP);
-        if (SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) keys &= ~(1u << KEY_DOWN);
-        if (is_pad_button_pressed(s_pad, settings_.pad_r)) keys &= ~(1u << KEY_R);
-        if (is_pad_button_pressed(s_pad, settings_.pad_l)) keys &= ~(1u << KEY_L);
+    if (pad_) {
+        if (is_pad_button_pressed(pad_, settings_.pad_a)) keys &= ~(1u << KEY_A);
+        if (is_pad_button_pressed(pad_, settings_.pad_b)) keys &= ~(1u << KEY_B);
+        if (SDL_GameControllerGetButton(pad_, SDL_CONTROLLER_BUTTON_BACK)) keys &= ~(1u << KEY_SELECT);
+        if (SDL_GameControllerGetButton(pad_, SDL_CONTROLLER_BUTTON_START)) keys &= ~(1u << KEY_START);
+        if (SDL_GameControllerGetButton(pad_, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) keys &= ~(1u << KEY_RIGHT);
+        if (SDL_GameControllerGetButton(pad_, SDL_CONTROLLER_BUTTON_DPAD_LEFT)) keys &= ~(1u << KEY_LEFT);
+        if (SDL_GameControllerGetButton(pad_, SDL_CONTROLLER_BUTTON_DPAD_UP)) keys &= ~(1u << KEY_UP);
+        if (SDL_GameControllerGetButton(pad_, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) keys &= ~(1u << KEY_DOWN);
+        if (is_pad_button_pressed(pad_, settings_.pad_r)) keys &= ~(1u << KEY_R);
+        if (is_pad_button_pressed(pad_, settings_.pad_l)) keys &= ~(1u << KEY_L);
 
-        int16_t axis_x = SDL_GameControllerGetAxis(s_pad, SDL_CONTROLLER_AXIS_LEFTX);
-        int16_t axis_y = SDL_GameControllerGetAxis(s_pad, SDL_CONTROLLER_AXIS_LEFTY);
+        int16_t axis_x = SDL_GameControllerGetAxis(pad_, SDL_CONTROLLER_AXIS_LEFTX);
+        int16_t axis_y = SDL_GameControllerGetAxis(pad_, SDL_CONTROLLER_AXIS_LEFTY);
         process_axis_input(axis_x, axis_y, keys);
     } else {
         // Fallback: merge host keys
         keys &= host_keys;
     }
 
-    // 3. Dialog Turbo
+    // 3. Dialog Turbo: drive the held state every frame, then apply the A/B pulse.
     bool turbo_held = false;
-    if (ks && ks[SDL_SCANCODE_TAB]) turbo_held = true;
-    if (s_pad && SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_Y)) turbo_held = true;
-    if (turbo_held && DialogTurbo::instance().is_enabled()) {
-        keys = DialogTurbo::instance().process_keyinput(keys, ++turbo_frame_counter_);
+    if (ks && settings_.turbo_key != SDL_SCANCODE_UNKNOWN && ks[settings_.turbo_key]) turbo_held = true;
+    if (is_pad_button_pressed(pad_, settings_.turbo_pad)) turbo_held = true;
+    DialogTurbo& turbo = dialog_turbo();
+    turbo.set_held(turbo_held);
+    if (turbo_held && turbo.is_enabled()) {
+        keys = turbo.process_keyinput(keys, ++turbo_frame_counter_);
     }
 
-    s_last_frame = current_frame;
-    s_last_host_keys = host_keys;
-    s_cached_keys = keys;
+    last_frame_ = current_frame;
+    last_host_keys_ = host_keys;
+    cached_keys_ = keys;
 
     return keys;
 }

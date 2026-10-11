@@ -26,7 +26,9 @@ namespace gbaimp {
 
 namespace {
 
-// 5x7 ASCII font (from ASCII 32 to 126)
+// 5x7 ASCII font (from ASCII 32 to 126).
+// PROVENANCE: this table matches a widely copied public 5x7 font whose origin could not be
+// established; see NOTICE.md. Replace it with an original or CC0 font before a formal release.
 const uint8_t kFont5x7[][5] = {
     {0x00, 0x00, 0x00, 0x00, 0x00}, // ' '
     {0x00, 0x00, 0x5F, 0x00, 0x00}, // '!'

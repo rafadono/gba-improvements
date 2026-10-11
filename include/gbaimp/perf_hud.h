@@ -45,6 +45,9 @@ struct PerfHudSettings {
 
 class PerfHud {
 public:
+    // Independently constructible (tests, multi-instance hosts); instance() stays the shared default.
+    PerfHud();
+
     static PerfHud& instance();
 
     const PerfHudSettings& settings() const { return settings_; }
@@ -73,7 +76,6 @@ public:
     const SDL_Rect& game_viewport() const { return game_viewport_; }
 
 private:
-    PerfHud();
 
     void record_frame();
     void update_drag(int mouse_x, int mouse_y, bool mouse_down, float hud_w, float hud_h);
