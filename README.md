@@ -1,5 +1,7 @@
 # gba-improvements
 
+[![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Project-FF5E5B?style=flat&logo=kofi&logoColor=white)](https://ko-fi.com/rafadono)
+
 Reusable, game-agnostic enhancements for static recompilations of Game Boy Advance games
 (designed to sit next to a `gbarecomp`-style runtime). The repository contains only C++17 + SDL2
 code and support scripts: no game data, no ROM addresses and no recompiler code.
@@ -90,6 +92,14 @@ need neither a display nor an audio device. Requirements: CMake 3.16+, a C++17 c
 - [`tools/README.md`](tools/README.md): the helper scripts and `verify_rom_hash`.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): what is done and what is still future work.
 - [`CHANGELOG.md`](CHANGELOG.md): what changed.
+
+## Support
+
+If you find this library useful and want to support its ongoing development:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Project-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/rafadono)
+
+[![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/rafadono)
 
 ## License
 Released under the [MIT License](LICENSE). See [`NOTICE.md`](NOTICE.md) for third-party notes and
