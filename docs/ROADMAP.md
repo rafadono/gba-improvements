@@ -17,6 +17,7 @@
 - [x] Runnable example host (`examples/minimal_host`), `docs/GBARECOMP_CONTRACT.md`, MIT license.
 
 - [x] Generic SDL host glue (`game_host.h`) and runtime-menu glue (`runtime_ui_glue.h`), so hosts only supply their game-specific callbacks.
+- [x] Settings registry, standard panel and `.ini` persistence (`host_settings.h`) with a recomp-ui adapter (`runtime_ui_settings.h`), replacing the per-host `game_config.cpp` copies.
 
 ## Ideas for the existing modules
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.

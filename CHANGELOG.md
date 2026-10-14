@@ -9,6 +9,8 @@ Working-tree changes on top of the initial import.
 
 ### Added
 - **`gbaimp/game_host.h`** (`GameHostConfig`, `install_game_host`, `game_host_stats`, `is_gba_game_texture`, `default_game_viewport`): the generic SDL handlers (game image, colour correction, letterbox, mask, interpolation, performance HUD, audio, diagnostics) with optional host callbacks for what is game specific; test `test_game_host`.
+- **`gbaimp/host_settings.h`** (`SettingsRegistry`, `Setting`, `IniExtension`, `register_standard_settings`, `SettingsTargets`): declarative settings registry with get / set by id, `.ini` save / load (file name, header and section order are parameters, legacy and unknown keys tolerated) and the standard panel of every library module with the ids and `.ini` keys hosts already use; test `test_host_settings`.
+- **`gbaimp/runtime_ui_settings.h`** (`RuntimeUiBinding`, `runtime_menu_is_open/open/close/toggle`): header-only recomp-ui / `RunOptions` adapter for the registry, for hosts that build recomp-ui.
 - **`gbaimp/runtime_ui_glue.h`** (`RuntimeUiGlueOptions`, `create_standard_ui`, `GBAIMP_RUNTIME_UI_WRAP`, `GBAIMP_RUNTIME_UI_RENAME_FORWARDER`): header-only tuning of the runtime settings menu for hosts that build recomp-ui.
 - **SDL interposition layer** (`gbaimp/sdl_interpose.h`): `SdlFunctions` / `SdlHandlers` handler table for `SDL_PollEvent`, `SDL_UpdateTexture`, `SDL_RenderCopy`, `SDL_RenderPresent`,
   `SDL_QueueAudio` and `SDL_OpenAudioDevice`; `sdl_real()`; `set_sdl_handlers()` / `sdl_handlers()`; Linux `GBAIMP_DEFINE_LD_WRAPS()` macro for `-Wl,--wrap`;
