@@ -38,7 +38,8 @@ add_library(gba_improvements STATIC
     src/game_host.cpp
     src/widescreen.cpp
     src/capture_harness.cpp
-    src/host_settings.cpp)
+    src/host_settings.cpp
+    src/ram_dispatch.cpp)
 add_library(gbaimp::gba_improvements ALIAS gba_improvements)
 
 target_include_directories(gba_improvements PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -103,7 +104,7 @@ if(GBAIMP_BUILD_TESTS)
         pixel_art_upscaler screen_filters audio_dsp hd_audio_player dialog_turbo
         hud_anchoring input_enhancements savestate_thumbnails hooks
         perf_hud frame_interpolator instances audio_pipeline sdl_interpose
-        audio_device audio_threads game_host widescreen capture_harness host_settings)
+        audio_device audio_threads game_host widescreen capture_harness host_settings ram_dispatch host_boot)
     foreach(_t IN LISTS _gbaimp_tests)
         add_executable(${_gbaimp_test_prefix}test_${_t} tests/test_${_t}.cpp)
         target_link_libraries(${_gbaimp_test_prefix}test_${_t} PRIVATE gba_improvements)
@@ -133,4 +134,30 @@ if(GBAIMP_BUILD_TESTS)
     target_link_libraries(${_gbaimp_test_prefix}test_audio_threads PRIVATE Threads::Threads)
     # The runtime-UI adapter is compiled against a stand-in for recomp-ui's header.
     target_include_directories(${_gbaimp_test_prefix}test_host_settings PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests/stubs")
+
+    # tools/gen_ram_dispatch.py: unit tests of the script, and an end-to-end build of its output
+    # (generated on a fixture cache, compiled against the library with a stand-in runtime header).
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME ${_gbaimp_test_prefix}gen_ram_dispatch_py
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gen_ram_dispatch.py)
+        set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/gen_ram_dispatch_fixture")
+        file(GLOB _gen_fixture_inputs "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ram_dispatch/cache/*/*.c")
+        add_custom_command(
+            OUTPUT "${_gen_dir}/ram_overlay_dispatch.cpp" "${_gen_dir}/ram_overlay_dispatch.h"
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_ram_dispatch.py
+                --cache-dir ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ram_dispatch/cache
+                --out-dir ${_gen_dir} --symbol-prefix khfix --game-name "Fixture Game"
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_ram_dispatch.py ${_gen_fixture_inputs}
+            COMMENT "Generating the RAM dispatcher fixture")
+        add_executable(${_gbaimp_test_prefix}test_ram_dispatch_generated
+            tests/test_ram_dispatch_generated.cpp "${_gen_dir}/ram_overlay_dispatch.cpp")
+        target_include_directories(${_gbaimp_test_prefix}test_ram_dispatch_generated PRIVATE
+            "${_gen_dir}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ram_dispatch")
+        target_link_libraries(${_gbaimp_test_prefix}test_ram_dispatch_generated PRIVATE gba_improvements)
+        target_compile_definitions(${_gbaimp_test_prefix}test_ram_dispatch_generated PRIVATE SDL_MAIN_HANDLED)
+        add_test(NAME ${_gbaimp_test_prefix}ram_dispatch_generated COMMAND ${_gbaimp_test_prefix}test_ram_dispatch_generated)
+    else()
+        message(STATUS "gba-improvements: Python 3 not found; skipping the gen_ram_dispatch tests")
+    endif()
 endif()

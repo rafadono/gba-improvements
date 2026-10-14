@@ -33,5 +33,5 @@ Shared: `--root` (all scripts except `gen_symbols.py`), `--rom` / `--rom-base` (
 - `trace_control_flow.py`: `--rom` (required), `--code-limit` (`0x08140000`), `--entry-point` (`0x080000C0`), `--seeds`, `-o/--output`.
 - `merge_coverage_toml.py`: `--toml` (`<root>/config/recomp.toml`), `--symbols-dir`, `--cache-dir`, `--rom`, `--prologue-scan-limit` (`0x140000`), `--target` (`3650`).
 - `audit_code_coverage.py`: `--toml`, `--symbols-tsv`, `--report`, `--game-name` (`GBA game`), `--scan-limit` (`0x200000`).
-- `gen_ram_dispatch.py`: `--cache-dir`, `--cache-pattern`, `--out-dir`, `--symbol-prefix` (`recomp`; yields `<prefix>_ram_dispatch_hook` and `<prefix>_install_ram_dispatch`), `--game-name`, `--runtime-header`.
+- `gen_ram_dispatch.py`: `--migrate FILE...` (convert an older generated `ram_overlay_dispatch.cpp` in place to the `gbaimp/ram_dispatch_gbarecomp.h` form and exit), `--cache-dir`, `--cache-pattern`, `--out-dir`, `--symbol-prefix` (`recomp`; yields `<prefix>_ram_dispatch_hook` and `<prefix>_install_ram_dispatch`), `--game-name`, `--runtime-header`.
 - `gen_symbols.py`: positional `rom`, `-o`, `--code-size` (`0x122000`), `--task-prefix` (`task_`), `--mode-prefix` (`mode_`).

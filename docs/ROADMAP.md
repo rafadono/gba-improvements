@@ -21,6 +21,8 @@
 - [x] Headless capture and scripted-input harness (`capture_harness.h`, `docs/CAPTURE_HARNESS.md`, `tools/capture/`).
 - [x] Settings registry, standard panel and `.ini` persistence (`host_settings.h`) with a recomp-ui adapter (`runtime_ui_settings.h`), replacing the per-host `game_config.cpp` copies.
 
+- [x] Common host boot (`host_main.h`), native RAM-overlay dispatch (`ram_dispatch.h`), generic `msvc_compat.h` / `scaffold_stub.h`.
+
 ## Ideas for the existing modules
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
 - [ ] `savestate_thumbnails`: selectable image format.
