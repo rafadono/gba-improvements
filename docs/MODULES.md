@@ -106,6 +106,12 @@ One handler / real-function design for every platform, used to observe or alter 
 - Windows limitations (reported, never fatal): only IAT / delay-load imports are intercepted (not `GetProcAddress` lookups or a statically linked SDL); modules loaded after the install are not patched; a slot that does not hold SDL's own export (a foreign hook) is left alone and counted as foreign; security software that write-protects import tables can make a patch fail.
 - Thread safety: install / set / uninstall are serialized by an internal mutex; intended use is once, early in `main()`. Handlers run on whatever thread calls SDL.
 
+### `game_host.h`: `GameHostConfig`, `install_game_host`
+The six SDL handlers that route a runtime's SDL calls into the library (game-image detection, colour correction, letterboxing with the viewport reported to `PerfHud`, screen mask, frame interpolation, performance HUD, pull-callback and direct-queue audio, call counters and audio metering for diagnostics) so a host does not carry its own copy. A host fills a `GameHostConfig` with the optional callbacks that are specific to its game (`on_poll`, `on_event`, `on_native_frame`, `compute_viewport`, `after_game_image`, `on_present_begin`, `render_present_overlay`, `before_present`, `print_stats`) and calls `install_game_host()` once. The Linux `--wrap` shims (`GBAIMP_DEFINE_LD_WRAPS()`) stay in the host because they must be expanded in the final executable. `is_gba_game_texture()` and `default_game_viewport()` are public helpers.
+
+### `runtime_ui_glue.h`: `create_standard_ui`
+Header-only, compiled only by hosts that build recomp-ui (needs `recomp_runtime_ui.h` and `GBARECOMP_RUNTIME_UI`). Adjusts the view-mode labels and removes the RESUME row of the menu that `recomp_runtime_ui_create_standard()` builds, with the macros `GBAIMP_RUNTIME_UI_WRAP` (GNU ld `--wrap`) and `GBAIMP_RUNTIME_UI_RENAME_FORWARDER` (MSVC compile-time symbol rename) to interpose that call.
+
 ### `relaxed.h`: `Relaxed<T>`
 A copyable, implicitly convertible wrapper around `std::atomic<T>` with relaxed ordering. The settings structs read by an audio thread while the UI thread writes them (`AudioDspSettings`, `HdAudioSettings`) use it for scalar fields, which keeps the field-style API (`s.enabled = true; float g = s.gain;`) while making each access data-race free.
 

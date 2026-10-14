@@ -16,6 +16,8 @@
 - [x] Python scripts parametrized by command-line arguments (see `tools/README.md`); self-contained `verify_rom_hash` with SHA-1 test vectors.
 - [x] Runnable example host (`examples/minimal_host`), `docs/GBARECOMP_CONTRACT.md`, MIT license.
 
+- [x] Generic SDL host glue (`game_host.h`) and runtime-menu glue (`runtime_ui_glue.h`), so hosts only supply their game-specific callbacks.
+
 ## Ideas for the existing modules
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
 - [ ] `savestate_thumbnails`: selectable image format.

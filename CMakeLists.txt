@@ -34,7 +34,8 @@ add_library(gba_improvements STATIC
     src/savestate_thumbnails.cpp
     src/perf_hud.cpp
     src/input_enhancements.cpp
-    src/hud_anchoring.cpp)
+    src/hud_anchoring.cpp
+    src/game_host.cpp)
 add_library(gbaimp::gba_improvements ALIAS gba_improvements)
 
 target_include_directories(gba_improvements PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -99,7 +100,7 @@ if(GBAIMP_BUILD_TESTS)
         pixel_art_upscaler screen_filters audio_dsp hd_audio_player dialog_turbo
         hud_anchoring input_enhancements savestate_thumbnails hooks
         perf_hud frame_interpolator instances audio_pipeline sdl_interpose
-        audio_device audio_threads)
+        audio_device audio_threads game_host)
     foreach(_t IN LISTS _gbaimp_tests)
         add_executable(${_gbaimp_test_prefix}test_${_t} tests/test_${_t}.cpp)
         target_link_libraries(${_gbaimp_test_prefix}test_${_t} PRIVATE gba_improvements)
@@ -112,7 +113,7 @@ if(GBAIMP_BUILD_TESTS)
     endforeach()
 
     # sdl_interpose / audio_device: Linux exercises the --wrap shims, Windows the IAT patcher.
-    foreach(_t sdl_interpose audio_device)
+    foreach(_t sdl_interpose audio_device game_host)
         if(NOT WIN32)
             target_link_options(${_gbaimp_test_prefix}test_${_t} PRIVATE
                 -Wl,--wrap=SDL_PollEvent -Wl,--wrap=SDL_UpdateTexture -Wl,--wrap=SDL_RenderCopy
