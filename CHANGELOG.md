@@ -8,6 +8,7 @@ the project has no tagged release yet, so versions below are descriptive.
 Working-tree changes on top of the initial import.
 
 ### Added
+- **`gbaimp/capture_harness.h`** (`capture::configure`, `CaptureConfig`, `on_emulated_frame`, `on_native_frame`, `on_before_present`, `extra_runtime_args`, `settings_overrides`, `encode_png_rgb` / `write_png_rgb` and the public parsers): environment-gated headless capture and scripted-input harness with a host-chosen variable prefix; `docs/CAPTURE_HARNESS.md`, generic runners and image tools in `tools/capture/`; test `test_capture_harness`.
 - **`gbaimp/game_host.h`** (`GameHostConfig`, `install_game_host`, `game_host_stats`, `is_gba_game_texture`, `default_game_viewport`): the generic SDL handlers (game image, colour correction, letterbox, mask, interpolation, performance HUD, audio, diagnostics) with optional host callbacks for what is game specific; test `test_game_host`.
 - **`gbaimp/runtime_ui_glue.h`** (`RuntimeUiGlueOptions`, `create_standard_ui`, `GBAIMP_RUNTIME_UI_WRAP`, `GBAIMP_RUNTIME_UI_RENAME_FORWARDER`): header-only tuning of the runtime settings menu for hosts that build recomp-ui.
 - **SDL interposition layer** (`gbaimp/sdl_interpose.h`): `SdlFunctions` / `SdlHandlers` handler table for `SDL_PollEvent`, `SDL_UpdateTexture`, `SDL_RenderCopy`, `SDL_RenderPresent`,

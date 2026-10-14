@@ -14,6 +14,8 @@ the command line. Hex values accept `0x...`. Defaults resolve relative to
 | `gen_symbols.py` | Extract `task_*`/`mode_*` function symbols from the ROM's debug descriptor tables. |
 | `verify_rom_hash/` | Self-contained C++ tool (built by CMake with `GBAIMP_BUILD_TOOLS`, ON for a top-level build, OFF as a subproject): `verify_rom_hash <rom> <expected_sha1>`; exit 0 match, 1 mismatch, 2 usage/IO error. Its tests (`verify_rom_hash_sha1_vectors`, `verify_rom_hash_cli`) run under `ctest`. |
 
+The `capture/` folder holds the generic parts of the headless capture harness (runners `run_capture.sh` / `run_capture.ps1`, `montage.py`, `stroke_runs.py`); see `docs/CAPTURE_HARNESS.md`.
+
 ## Examples
 
 ```sh

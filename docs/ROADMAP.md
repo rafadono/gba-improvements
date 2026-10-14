@@ -17,6 +17,7 @@
 - [x] Runnable example host (`examples/minimal_host`), `docs/GBARECOMP_CONTRACT.md`, MIT license.
 
 - [x] Generic SDL host glue (`game_host.h`) and runtime-menu glue (`runtime_ui_glue.h`), so hosts only supply their game-specific callbacks.
+- [x] Headless capture and scripted-input harness (`capture_harness.h`, `docs/CAPTURE_HARNESS.md`, `tools/capture/`).
 
 ## Ideas for the existing modules
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
