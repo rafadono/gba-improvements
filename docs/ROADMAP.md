@@ -25,6 +25,7 @@
 - [x] HD music trigger for the m4a sound engine (`m4a_music_hook.h`) with a ROM-signature locator, so hosts no longer hard-code function addresses.
 
 ## Ideas for the existing modules
+- [x] Shared build kit for hosts (`cmake/GbaimpHost.cmake`, `templates/host/`, `tools/new_host/`, `docs/NEW_HOST.md`).
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
 - [ ] `savestate_thumbnails`: selectable image format.
 - [ ] `input_enhancements`: more `PadButtonChoice` entries (stick clicks, back/guide), persistence of analog settings in the ini.

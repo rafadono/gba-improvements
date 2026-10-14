@@ -161,4 +161,28 @@ if(GBAIMP_BUILD_TESTS)
     else()
         message(STATUS "gba-improvements: Python 3 not found; skipping the gen_ram_dispatch tests")
     endif()
+
+    # Build kit (cmake/GbaimpHost.cmake, templates/host, tools/new_host): script-level tests that
+    # need no SDL2, gbarecomp or recomp-ui (stubs live in tests/buildkit/fixture).
+    set(_bk_gen_args -DGEN=${CMAKE_GENERATOR})
+    if(CMAKE_GENERATOR_PLATFORM)
+        list(APPEND _bk_gen_args -DPLATFORM_ARG=${CMAKE_GENERATOR_PLATFORM})
+    endif()
+    if(CMAKE_MAKE_PROGRAM)
+        list(APPEND _bk_gen_args -DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM})
+    endif()
+    add_test(NAME ${_gbaimp_test_prefix}buildkit_host_cmake
+        COMMAND ${CMAKE_COMMAND}
+            -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/buildkit/fixture
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bk
+            -DHOST_CMAKE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/GbaimpHost.cmake
+            ${_bk_gen_args}
+            -DC_COMPILER=${CMAKE_C_COMPILER} -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/buildkit/run_buildkit_tests.cmake)
+    add_test(NAME ${_gbaimp_test_prefix}buildkit_new_host
+        COMMAND ${CMAKE_COMMAND}
+            -DTOOL=${CMAKE_CURRENT_SOURCE_DIR}/tools/new_host/new_host.cmake
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bn
+            -DTEMPLATES=${CMAKE_CURRENT_SOURCE_DIR}/templates/host
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/buildkit/test_new_host.cmake)
 endif()
