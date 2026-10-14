@@ -22,6 +22,7 @@
 - [x] Settings registry, standard panel and `.ini` persistence (`host_settings.h`) with a recomp-ui adapter (`runtime_ui_settings.h`), replacing the per-host `game_config.cpp` copies.
 
 - [x] Common host boot (`host_main.h`), native RAM-overlay dispatch (`ram_dispatch.h`), generic `msvc_compat.h` / `scaffold_stub.h`.
+- [x] HD music trigger for the m4a sound engine (`m4a_music_hook.h`) with a ROM-signature locator, so hosts no longer hard-code function addresses.
 
 ## Ideas for the existing modules
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
