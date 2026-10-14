@@ -1,0 +1,71 @@
+cmake_minimum_required(VERSION 3.20)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+project(@PROJECT_NAME@ C CXX)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+if(MSVC)
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/msvc_compat.h" MSVC_COMPAT_HEADER)
+    add_compile_options("/FI${MSVC_COMPAT_HEADER}")
+endif()
+
+set(GBARECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/gbarecomp"
+    CACHE PATH "Path to gbarecomp platform core (git submodule)")
+if(NOT EXISTS "${GBARECOMP_ROOT}/CMakeLists.txt")
+    message(FATAL_ERROR "GBARECOMP_ROOT does not point to a gbarecomp checkout: ${GBARECOMP_ROOT}")
+endif()
+
+# SDL2 (Windows: bundled "VC" devel package in third_party/sdl2).
+if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl2/include/SDL.h")
+    set(SDL2_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl2/include" CACHE PATH "SDL2 include dir" FORCE)
+    set(SDL2_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl2/lib/x64/SDL2.lib" CACHE FILEPATH "SDL2 library" FORCE)
+endif()
+if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl2/cmake/sdl2-config.cmake")
+    set(SDL2_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl2/cmake" CACHE PATH "SDL2 config dir" FORCE)
+endif()
+
+# recomp-ui in-game overlay.
+set(RECOMP_UI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/recomp-ui")
+if(EXISTS "${RECOMP_UI_DIR}/src/recomp_runtime_ui.h")
+    set(GBARECOMP_RUNTIME_UI_ROOT "${RECOMP_UI_DIR}" CACHE PATH "Path to recomp-ui" FORCE)
+    set(RECOMP_UI_ROOT "${RECOMP_UI_DIR}" CACHE PATH "recomp-ui root" FORCE)
+    include("${RECOMP_UI_DIR}/recomp_ui.cmake")
+endif()
+
+set(GBARECOMP_GENERATED_BIOS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/generated_bios"
+    CACHE PATH "Directory containing locally generated BIOS recompilation sources" FORCE)
+add_subdirectory("${GBARECOMP_ROOT}" gbarecomp_build EXCLUDE_FROM_ALL)
+
+# gba-improvements (git submodule; -DGBAIMP_ROOT=<path> overrides it).
+set(GBAIMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/gba-improvements"
+    CACHE PATH "gba-improvements library root (git submodule)")
+if(NOT EXISTS "${GBAIMP_ROOT}/CMakeLists.txt")
+    message(FATAL_ERROR "GBAIMP_ROOT does not point to a gba-improvements checkout: ${GBAIMP_ROOT}")
+endif()
+add_subdirectory("${GBAIMP_ROOT}" gba_improvements_build EXCLUDE_FROM_ALL)
+include("${GBAIMP_ROOT}/cmake/GbaimpHost.cmake")
+
+# Game-specific sources only; everything else is done by gbaimp_add_host().
+set(@SYMBOL_PREFIX_UPPER@_COMMON_SOURCES
+    src/gbaimp_integration.cpp
+    src/sdl_intercepts.cpp
+    src/runtime_ui_standard.cpp
+    src/widescreen_adapter.cpp
+    src/ram_overlay_dispatch.cpp
+)
+
+gbaimp_add_host(@GAME_EXE@
+    SYMBOL_PREFIX @SYMBOL_PREFIX@
+    SOURCES
+        src/main.cpp
+        src/game_config.cpp
+        ${@SYMBOL_PREFIX_UPPER@_COMMON_SOURCES}
+    TEST_TARGET @TEST_TARGET@
+    TEST_SOURCES
+        tests/test_all_modules.cpp
+        ${@SYMBOL_PREFIX_UPPER@_COMMON_SOURCES}
+        src/scaffold_stub.cpp
+)

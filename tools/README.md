@@ -7,6 +7,7 @@ the command line. Hex values accept `0x...`. Defaults resolve relative to
 
 | Script | Purpose |
 |---|---|
+| `new_host/new_host.cmake` | Instantiate `templates/host/` (CMakeLists, build scripts, Dockerfile, CI) for a new game: `cmake -DOUT_DIR=.. -DGAME_EXE=.. -DSYMBOL_PREFIX=.. -DROM_FILE=.. -DRECOMP_CONFIG=.. -P new_host.cmake`; see `docs/NEW_HOST.md`. |
 | `trace_control_flow.py` | Follow branches from the entry point and scan literal pools to discover reachable ARM/Thumb functions; writes a TSV. |
 | `merge_coverage_toml.py` | Merge functions from symbol files, the recompiler cache and ROM prologue scanning into a recompiler TOML's `[[extra_func]]` list. |
 | `audit_code_coverage.py` | Detect function prologues in the ROM, compare to known symbols and write a Markdown coverage report. |

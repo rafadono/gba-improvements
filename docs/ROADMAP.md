@@ -19,6 +19,7 @@
 - [x] Generic SDL host glue (`game_host.h`) and runtime-menu glue (`runtime_ui_glue.h`), so hosts only supply their game-specific callbacks.
 
 ## Ideas for the existing modules
+- [x] Shared build kit for hosts (`cmake/GbaimpHost.cmake`, `templates/host/`, `tools/new_host/`, `docs/NEW_HOST.md`).
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
 - [ ] `savestate_thumbnails`: selectable image format.
 - [ ] `input_enhancements`: more `PadButtonChoice` entries (stick clicks, back/guide), persistence of analog settings in the ini.

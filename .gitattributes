@@ -3,3 +3,4 @@
 *.py text eol=lf
 *.bmp binary
 *.wav binary
+templates/host/** text eol=lf

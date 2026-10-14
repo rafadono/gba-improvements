@@ -1,0 +1,187 @@
+param(
+    [string]$Target = "@GAME_EXE@",
+    [string]$Config = "Release",
+    [switch]$BuildRecompiler,
+    [switch]$Recompile,
+    [string]$RomPath = "roms\@ROM_FILE@",
+    # Build directory under the repo root. Use a different one than the Docker/Linux
+    # build (which uses "build") so the two CMake caches do not clash, e.g. -BuildDir build-vs.
+    [string]$BuildDir = "build"
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Native commands do not honour $ErrorActionPreference: check their exit code ourselves and
+# stop the script with that same code, so CI and callers see the failure.
+function Invoke-Checked([string]$What, [scriptblock]$Command) {
+    $global:LASTEXITCODE = 0
+    & $Command
+    $code = $global:LASTEXITCODE
+    if ($code -ne 0) {
+        Write-Host "[@GAME_EXE@] $What failed (exit code $code)." -ForegroundColor Red
+        exit $code
+    }
+}
+
+function Initialize-VcEnvironment {
+    if (Get-Command cl.exe -ErrorAction SilentlyContinue) { return }
+
+    $vcvarsCandidates = @(
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+    )
+
+    $vcvars = $null
+    foreach ($candidate in $vcvarsCandidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            $vcvars = $candidate
+            break
+        }
+    }
+
+    if (-not $vcvars) {
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path -LiteralPath $vswhere) {
+            $vsPath = & $vswhere -latest -products * -property installationPath
+            if ($vsPath) {
+                $possible = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+                if (Test-Path -LiteralPath $possible) { $vcvars = $possible }
+            }
+        }
+    }
+
+    if ($vcvars) {
+        Write-Host "[@GAME_EXE@] Initializing MSVC x64 build environment..."
+        cmd.exe /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+            if ($_ -match '^(.*?)=(.*)$') {
+                [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2], [System.EnvironmentVariableTarget]::Process)
+            }
+        }
+    }
+}
+
+Initialize-VcEnvironment
+
+function Find-Tool([string]$name, [string[]]$fallbackPaths) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    foreach ($path in $fallbackPaths) {
+        if (Test-Path -LiteralPath $path) { return $path }
+    }
+    return $null
+}
+
+$cmakeCandidates = @(
+    "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe",
+    "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+)
+
+$cmakePath = Find-Tool "cmake.exe" $cmakeCandidates
+if (-not $cmakePath) {
+    throw "cmake.exe not found. Install Visual Studio with C++ CMake tools or add CMake to PATH."
+}
+
+$ninjaCandidates = @(
+    "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe",
+    "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
+)
+$ninjaPath = Find-Tool "ninja.exe" $ninjaCandidates
+if ($ninjaPath -and (-not (Get-Command ninja.exe -ErrorAction SilentlyContinue))) {
+    $ninjaDir = Split-Path -Parent $ninjaPath
+    $env:Path = "$ninjaDir;$env:Path"
+}
+
+$sdlHeader = Join-Path $root "third_party\sdl2\include\SDL.h"
+if (-not (Test-Path -LiteralPath $sdlHeader)) {
+    Write-Host "[@GAME_EXE@] Setting up SDL2 library..."
+    $tempDir = Join-Path $root "third_party\temp"
+    New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+    $zipPath = Join-Path $tempDir "sdl2.zip"
+    Invoke-Checked "SDL2 download" { curl.exe -L "https://github.com/libsdl-org/SDL/releases/download/release-2.30.12/SDL2-devel-2.30.12-VC.zip" -o $zipPath }
+    Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+    Move-Item -Path (Join-Path $tempDir "SDL2-2.30.12") -Destination (Join-Path $root "third_party\sdl2") -Force
+    Remove-Item -Recurse -Force $tempDir
+}
+
+$recompUiDir = Join-Path $root "external\recomp-ui"
+if (-not (Test-Path -LiteralPath (Join-Path $recompUiDir "CMakeLists.txt"))) {
+    Write-Host "[@GAME_EXE@] Initializing recomp-ui submodule..."
+    Invoke-Checked "recomp-ui submodule init" { git submodule update --init --recursive external/recomp-ui }
+}
+
+Write-Host "[@GAME_EXE@] CMake: $cmakePath"
+
+$buildDir = Join-Path $root $BuildDir
+
+if ($BuildRecompiler) {
+    Write-Host "[@GAME_EXE@] Building gba_recompile..."
+    Invoke-Checked "CMake configure" { & $cmakePath -S $root -B $buildDir -G "Ninja Multi-Config" }
+    Invoke-Checked "gba_recompile build" { & $cmakePath --build $buildDir --config $Config --target gba_recompile --parallel }
+    Write-Host "[@GAME_EXE@] gba_recompile built at $buildDir\gbarecomp_build\$Config\gba_recompile.exe"
+    exit 0
+}
+
+if ($Recompile) {
+    $recompilerBin = Join-Path $buildDir "gbarecomp_build\$Config\gba_recompile.exe"
+    if (-not (Test-Path -LiteralPath $recompilerBin)) {
+        Write-Host "[@GAME_EXE@] gba_recompile not found. Building it first..."
+        Invoke-Checked "gba_recompile build" { & $PSCommandPath -BuildRecompiler -Config $Config -BuildDir $BuildDir }
+    }
+
+    $resolvedRom = $null
+    if ($RomPath -and (Test-Path -LiteralPath (Join-Path $root $RomPath))) {
+        $resolvedRom = Join-Path $root $RomPath
+    } else {
+        $romCandidates = Get-ChildItem -Path (Join-Path $root "roms") -Filter "*.gba" -File -ErrorAction SilentlyContinue
+        if ($romCandidates) {
+            $resolvedRom = $romCandidates[0].FullName
+        }
+    }
+
+    if (-not $resolvedRom -or -not (Test-Path -LiteralPath $resolvedRom)) {
+        throw "ROM file not found. Place the ROM (.gba) into the roms/ directory."
+    }
+
+    # Generate the BIOS sources if a BIOS image is present and they do not exist yet.
+    $biosOutDir = Join-Path $root "generated_bios"
+    if (-not (Test-Path -LiteralPath (Join-Path $biosOutDir "bios_dispatch_table.cpp"))) {
+        $biosCandidates = Get-ChildItem -Path (Join-Path $root "bios") -Filter "*.gba" -File -ErrorAction SilentlyContinue
+        if ($biosCandidates) {
+            Write-Host "[@GAME_EXE@] Executing static recompilation on BIOS..."
+            New-Item -ItemType Directory -Force -Path $biosOutDir | Out-Null
+            $biosRom = $biosCandidates[0].FullName
+            Invoke-Checked "BIOS recompilation" { & $recompilerBin --bios $biosRom --out $biosOutDir }
+        }
+    }
+
+    $genDir = Join-Path $root "generated"
+    New-Item -ItemType Directory -Force -Path $genDir | Out-Null
+
+    Write-Host "[@GAME_EXE@] Executing static recompilation on $resolvedRom..."
+    $configFile = Join-Path $root "config\@RECOMP_CONFIG@"
+    $symbolsFile = Join-Path $root "symbols\imported_symbols.tsv"
+    Invoke-Checked "ROM recompilation" {
+        & $recompilerBin --rom $resolvedRom --config $configFile --symbols $symbolsFile --out $genDir
+    }
+
+    Write-Host "[@GAME_EXE@] C++ code generated in generated/ directory."
+    exit 0
+}
+
+Write-Host "[@GAME_EXE@] Configuring CMake in $buildDir..."
+Invoke-Checked "CMake configure" { & $cmakePath -S $root -B $buildDir -G "Ninja Multi-Config" }
+
+Write-Host "[@GAME_EXE@] Compiling target '$Target' ($Config)..."
+Invoke-Checked "Build of target '$Target'" { & $cmakePath --build $buildDir --config $Config --target $Target --parallel }
+
+$builtExe = Join-Path $buildDir "$Config\@GAME_EXE@.exe"
+if (Test-Path -LiteralPath $builtExe) {
+    Copy-Item -LiteralPath $builtExe -Destination (Join-Path $root "@GAME_EXE@.exe") -Force
+    Write-Host "[@GAME_EXE@] Deployed @GAME_EXE@.exe to workspace root."
+}
+
+Write-Host "[@GAME_EXE@] Build completed successfully."
+exit 0

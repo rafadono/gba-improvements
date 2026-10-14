@@ -8,6 +8,7 @@ the project has no tagged release yet, so versions below are descriptive.
 Working-tree changes on top of the initial import.
 
 ### Added
+- **Build kit** for host projects: `cmake/GbaimpHost.cmake` (`gbaimp_add_host()`: library link, `--wrap` options, MSVC recomp-ui symbol rename, post-build copies, test executable), parametrised templates in `templates/host/` (`CMakeLists.txt`, `build.ps1` that propagates the exit code of failing commands, `build.sh`, `docker/Dockerfile`, CI workflow), `tools/new_host/new_host.cmake` to instantiate them for a new game, `docs/NEW_HOST.md`, and the tests `buildkit_host_cmake` and `buildkit_new_host`.
 - **`gbaimp/game_host.h`** (`GameHostConfig`, `install_game_host`, `game_host_stats`, `is_gba_game_texture`, `default_game_viewport`): the generic SDL handlers (game image, colour correction, letterbox, mask, interpolation, performance HUD, audio, diagnostics) with optional host callbacks for what is game specific; test `test_game_host`.
 - **`gbaimp/runtime_ui_glue.h`** (`RuntimeUiGlueOptions`, `create_standard_ui`, `GBAIMP_RUNTIME_UI_WRAP`, `GBAIMP_RUNTIME_UI_RENAME_FORWARDER`): header-only tuning of the runtime settings menu for hosts that build recomp-ui.
 - **SDL interposition layer** (`gbaimp/sdl_interpose.h`): `SdlFunctions` / `SdlHandlers` handler table for `SDL_PollEvent`, `SDL_UpdateTexture`, `SDL_RenderCopy`, `SDL_RenderPresent`,

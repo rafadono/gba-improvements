@@ -1,0 +1,151 @@
+name: Build @GAME_EXE@
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Windows x64 Build
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: x64
+
+      # build.ps1 exits with the failing command's exit code, so a broken
+      # configure or compile fails the job.
+      - name: Build Project
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\build.ps1 -Target @GAME_EXE@ -Config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build and Run Native Unit Tests
+        shell: powershell
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\build.ps1 -Target @TEST_TARGET@ -Config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\build\Release\@TEST_TARGET@.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run Automated Test Suite
+        if: hashFiles('tests/test_runtime_functions.py') != ''
+        shell: powershell
+        run: |
+          python tests/test_runtime_functions.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage Distribution Package
+        shell: powershell
+        run: |
+          $dist = "@GAME_EXE@-Windows-x64"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+
+          $exePath = if (Test-Path "build\Release\@GAME_EXE@.exe") { "build\Release\@GAME_EXE@.exe" } else { "@GAME_EXE@.exe" }
+          Copy-Item $exePath -Destination $dist
+
+          $sdlPath = if (Test-Path "build\Release\SDL2.dll") { "build\Release\SDL2.dll" } else { "SDL2.dll" }
+          Copy-Item $sdlPath -Destination $dist
+
+          foreach ($f in @("keybinds.ini", "README.md")) {
+            if (Test-Path $f) { Copy-Item $f -Destination $dist }
+          }
+          foreach ($d in @("config", "docs")) {
+            if (Test-Path $d) { Copy-Item -Recurse $d -Destination (Join-Path $dist $d) }
+          }
+
+          tar -a -c -f "$dist.zip" $dist
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: @GAME_EXE@-Windows-x64
+          path: @GAME_EXE@-Windows-x64.zip
+          retention-days: 14
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: @GAME_EXE@-Windows-x64.zip
+          generate_release_notes: true
+
+  build-linux:
+    name: Linux x64 Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev cmake ninja-build build-essential python3
+
+      - name: Build Project
+        run: |
+          chmod +x build.sh
+          ./build.sh -c Release
+
+      - name: Build and Run Native Unit Tests
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+        run: |
+          cmake --build build --config Release --target @TEST_TARGET@
+          ./build/@TEST_TARGET@
+
+      - name: Run Automated Test Suite
+        if: hashFiles('tests/test_runtime_functions.py') != ''
+        run: |
+          python3 tests/test_runtime_functions.py
+
+      - name: Stage Distribution Package
+        run: |
+          DIST="@GAME_EXE@-Linux-x64"
+          mkdir -p "$DIST"
+
+          EXE_PATH=$(if [ -f "build/@GAME_EXE@" ]; then echo "build/@GAME_EXE@"; else echo "@GAME_EXE@"; fi)
+          cp "$EXE_PATH" "$DIST/"
+          for f in keybinds.ini README.md; do [ -f "$f" ] && cp "$f" "$DIST/"; done
+          for d in config docs; do [ -d "$d" ] && cp -r "$d" "$DIST/"; done
+          true
+
+          tar -czvf "$DIST.tar.gz" "$DIST"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: @GAME_EXE@-Linux-x64
+          path: @GAME_EXE@-Linux-x64.tar.gz
+          retention-days: 14
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: @GAME_EXE@-Linux-x64.tar.gz
+          generate_release_notes: true
