@@ -18,6 +18,8 @@
 
 - [x] Generic SDL host glue (`game_host.h`) and runtime-menu glue (`runtime_ui_glue.h`), so hosts only supply their game-specific callbacks.
 
+- [x] Common host boot (`host_main.h`), native RAM-overlay dispatch (`ram_dispatch.h`), generic `msvc_compat.h` / `scaffold_stub.h`.
+
 ## Ideas for the existing modules
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
 - [ ] `savestate_thumbnails`: selectable image format.

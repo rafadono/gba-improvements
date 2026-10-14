@@ -8,6 +8,8 @@ the project has no tagged release yet, so versions below are descriptive.
 Working-tree changes on top of the initial import.
 
 ### Added
+- **`gbaimp/ram_dispatch.h`, `gbaimp/ram_dispatch_gbarecomp.h`** (`RamDispatchEntry`, `find_ram_dispatch`, `ram_dispatch_call`, `ram_dispatch_is_sorted`, `GBAIMP_DEFINE_RAM_DISPATCH[_N]`): table search and hook logic of the native RAM-overlay dispatcher; the generated host file keeps only the routines and the table. `tools/gen_ram_dispatch.py` emits the new form, has `--migrate` for existing generated files, and no longer emits duplicate names for an ARM and a Thumb routine at one address (tests: `ram_dispatch`, `ram_dispatch_generated`, `gen_ram_dispatch_py`).
+- **`gbaimp/host_main.h`** (`HostMainConfig`, `run_host_main`, `run_gbarecomp_host`, `set_env_default`, `build_run_args`), **`gbaimp/msvc_compat.h`** and **`gbaimp/scaffold_stub.h`**: the common `main()` start-up sequence and the generic host boilerplate (test: `host_boot`).
 - **`gbaimp/game_host.h`** (`GameHostConfig`, `install_game_host`, `game_host_stats`, `is_gba_game_texture`, `default_game_viewport`): the generic SDL handlers (game image, colour correction, letterbox, mask, interpolation, performance HUD, audio, diagnostics) with optional host callbacks for what is game specific; test `test_game_host`.
 - **`gbaimp/runtime_ui_glue.h`** (`RuntimeUiGlueOptions`, `create_standard_ui`, `GBAIMP_RUNTIME_UI_WRAP`, `GBAIMP_RUNTIME_UI_RENAME_FORWARDER`): header-only tuning of the runtime settings menu for hosts that build recomp-ui.
 - **SDL interposition layer** (`gbaimp/sdl_interpose.h`): `SdlFunctions` / `SdlHandlers` handler table for `SDL_PollEvent`, `SDL_UpdateTexture`, `SDL_RenderCopy`, `SDL_RenderPresent`,
