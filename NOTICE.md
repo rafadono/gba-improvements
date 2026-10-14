@@ -34,6 +34,8 @@ indexed by character code, so replacing it does not change any public API.
 - **SDL2** (https://libsdl.org) is the only external dependency. SDL2 is distributed under the zlib
   license. It is linked, not vendored: this repository does not contain SDL2 source or binaries.
   Hosts that ship SDL2 must follow its license terms.
+- **stb_truetype** (`third_party/stb/stb_truetype.h`, v1.26, Sean Barrett, https://github.com/nothings/stb) is vendored unmodified and compiled into `src/text_fonts.cpp` (with `STBTT_STATIC`). It is available under either the MIT License or the Unlicense / public domain, at your choice; both notices are kept at the end of the header and must stay with any copy of it. The header itself warns that it does not range-check malformed fonts: the library therefore only feeds it embedded (trusted) fonts and user fonts that passed `validate_truetype()` (see `docs/MODULES.md`, "text_fonts.h").
+- **Fonts**: the library contains **no font data** (the text engine tests build a tiny synthetic TrueType font in memory). A host that embeds fonts injects them with `FontLibrary::add_builtin_font()` and is responsible for shipping the licence text of each font it embeds (for example the SIL Open Font License 1.1 files that accompany OFL fonts) next to its binaries, and for the reserved-font-name rules of those licences.
 
 ## Related projects
 

@@ -31,10 +31,11 @@
 - [ ] `input_enhancements`: more `PadButtonChoice` entries (stick clicks, back/guide), persistence of analog settings in the ini.
 - [ ] `frame_interpolator`: use the `viewport` argument (it currently blends the whole output).
 
-## Planned: generic text overlay
+## Done: generic text overlay
 A host project currently carries an output-resolution text overlay whose generic parts are independent of any game: a TrueType glyph rasterizer with a glyph cache and atlas, a font manager (embedded and user fonts, validation of untrusted font files), and a text layout engine (wrapping, auto-fit, shadow/outline). The plan is to move those generic parts into the library behind a small interface, keeping everything that reads game memory (what text is on screen, when to hide the original) in the host.
-- [ ] Define the interface (a "page of text + origin + box" in, pixels out) and the atlas ownership rules.
-- [ ] Move rasterizer, glyph cache, font manager and layout into the library with their tests; keep the embedded font data and its licences in the host or as an optional module.
+- [x] Define the interface (a "page of text + origin + box" in, pixels out) and the atlas ownership rules (`text_types.h`, `text_renderer.h`).
+- [x] Move rasterizer, glyph cache, font manager and layout into the library with their tests; the embedded font data and its licences stay in the host (injected with `FontLibrary::add_builtin_font()`).
+- [ ] Optional: an opt-in module that bundles a few redistributable fonts, if a host without its own fonts wants one.
 
 ## Future work: widescreen core
 A reusable widescreen layer is the most valuable missing piece. The architecture (tilemap, background X and sprite X providers, effective viewport computation, pillarboxing) is generic, but it has to be kept separate from per-game knowledge.

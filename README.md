@@ -39,6 +39,12 @@ Status: pre-release (version 0.1.0 plus unreleased changes, see [`CHANGELOG.md`]
 | `audio_device` | Processes a runtime's SDL *pull-callback* audio: wraps the callback at `SDL_OpenAudioDevice` and runs the pipeline on the audio thread (real-time safe) | n/a |
 | `audio_pipeline` | `process_audio_block()`: HD mix + DSP in one call, stereo or mono, at the real device rate | n/a |
 
+### Text
+| Module | What it does | Options |
+|---|---|---|
+| `text_fonts` / `text_raster` / `text_layout` / `text_renderer` | Output-resolution text engine: a page of text + origin + box in, anti-aliased glyphs drawn at the real output resolution out (TrueType rasteriser with glyph cache and GPU atlas, font manager with validation of untrusted user fonts, word wrap / auto-fit / shadow / outline). The library ships no font data: the host injects its embedded fonts | Font family, size, line / letter spacing, keep or reflow line breaks, plain / shadow / outline, colours, opacity, auto-fit |
+| `text_fade` | Screen-fade maths (blend registers or palette to a fade the text colours follow) | n/a |
+
 ### Utilities
 | Module | What it does |
 |---|---|
