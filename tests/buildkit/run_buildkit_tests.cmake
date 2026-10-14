@@ -32,6 +32,9 @@ endif()
 # Each variant gets its own copy of the fixture so post-build copies never touch the repository.
 function(_variant name)
     file(COPY "${FIXTURE}/" DESTINATION "${WORK}/s_${name}")
+    # Placeholder runtime DLL, written here because *.dll is git-ignored and so cannot live in the
+    # fixture; gbaimp_add_host() only adds the SDL2.dll copy steps when the file exists.
+    file(WRITE "${WORK}/s_${name}/third_party/sdl2/lib/x64/SDL2.dll" "placeholder")
     file(MAKE_DIRECTORY "${WORK}/${name}")
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -S "${WORK}/s_${name}" -B "${WORK}/${name}" ${_gen_args}
