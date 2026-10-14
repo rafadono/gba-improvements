@@ -37,7 +37,8 @@ add_library(gba_improvements STATIC
     src/hud_anchoring.cpp
     src/game_host.cpp
     src/widescreen.cpp
-    src/capture_harness.cpp)
+    src/capture_harness.cpp
+    src/host_settings.cpp)
 add_library(gbaimp::gba_improvements ALIAS gba_improvements)
 
 target_include_directories(gba_improvements PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -102,7 +103,7 @@ if(GBAIMP_BUILD_TESTS)
         pixel_art_upscaler screen_filters audio_dsp hd_audio_player dialog_turbo
         hud_anchoring input_enhancements savestate_thumbnails hooks
         perf_hud frame_interpolator instances audio_pipeline sdl_interpose
-        audio_device audio_threads game_host widescreen capture_harness)
+        audio_device audio_threads game_host widescreen capture_harness host_settings)
     foreach(_t IN LISTS _gbaimp_tests)
         add_executable(${_gbaimp_test_prefix}test_${_t} tests/test_${_t}.cpp)
         target_link_libraries(${_gbaimp_test_prefix}test_${_t} PRIVATE gba_improvements)
@@ -130,4 +131,6 @@ if(GBAIMP_BUILD_TESTS)
     find_package(Threads REQUIRED)
     target_link_libraries(${_gbaimp_test_prefix}test_audio_device PRIVATE Threads::Threads)
     target_link_libraries(${_gbaimp_test_prefix}test_audio_threads PRIVATE Threads::Threads)
+    # The runtime-UI adapter is compiled against a stand-in for recomp-ui's header.
+    target_include_directories(${_gbaimp_test_prefix}test_host_settings PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests/stubs")
 endif()

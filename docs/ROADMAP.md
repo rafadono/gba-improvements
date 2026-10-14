@@ -19,6 +19,7 @@
 - [x] Widescreen core (`widescreen.h`): game profile interface, view policy, providers, effective viewport and hook chaining in the library; each game keeps only its profile (mode detection, providers, HUD zones).
 - [x] Generic SDL host glue (`game_host.h`) and runtime-menu glue (`runtime_ui_glue.h`), so hosts only supply their game-specific callbacks.
 - [x] Headless capture and scripted-input harness (`capture_harness.h`, `docs/CAPTURE_HARNESS.md`, `tools/capture/`).
+- [x] Settings registry, standard panel and `.ini` persistence (`host_settings.h`) with a recomp-ui adapter (`runtime_ui_settings.h`), replacing the per-host `game_config.cpp` copies.
 
 ## Ideas for the existing modules
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
