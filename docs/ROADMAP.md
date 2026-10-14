@@ -16,6 +16,7 @@
 - [x] Python scripts parametrized by command-line arguments (see `tools/README.md`); self-contained `verify_rom_hash` with SHA-1 test vectors.
 - [x] Runnable example host (`examples/minimal_host`), `docs/GBARECOMP_CONTRACT.md`, MIT license.
 
+- [x] Widescreen core (`widescreen.h`): game profile interface, view policy, providers, effective viewport and hook chaining in the library; each game keeps only its profile (mode detection, providers, HUD zones).
 - [x] Generic SDL host glue (`game_host.h`) and runtime-menu glue (`runtime_ui_glue.h`), so hosts only supply their game-specific callbacks.
 
 ## Ideas for the existing modules
@@ -31,9 +32,10 @@ A host project currently carries an output-resolution text overlay whose generic
 
 ## Future work: widescreen core
 A reusable widescreen layer is the most valuable missing piece. The architecture (tilemap, background X and sprite X providers, effective viewport computation, pillarboxing) is generic, but it has to be kept separate from per-game knowledge.
-- [ ] Define a game-profile interface (for example: whether the current mode should be widened, which layers to extend, which HUD zones to register).
-- [ ] Move the generic providers and viewport math into the library; keep each game's profile (addresses, mode detection) in the host project.
-- [ ] Confirm which hooks are needed from the recompilation runtime and document them (a first list is in `docs/GBARECOMP_CONTRACT.md`).
+- [x] Define a game-profile interface (for example: whether the current mode should be widened, which layers to extend, which HUD zones to register).
+- [x] Move the generic providers and viewport math into the library; keep each game's profile (addresses, mode detection) in the host project.
+- [x] Confirm which hooks are needed from the recompilation runtime and document them (`WidescreenBindings`, `docs/GBARECOMP_CONTRACT.md`).
+- [ ] Optional: `g_ws_bg_xy_provider`, `g_ws_obj_margin_provider` and `g_ws_native_view_left` are not covered by the core yet.
 
 ## Future work: option registry and UI overlay
 - [ ] A declarative option registry (name, type, range, default) that each module fills in.

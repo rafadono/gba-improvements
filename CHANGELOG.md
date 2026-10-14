@@ -8,6 +8,7 @@ the project has no tagged release yet, so versions below are descriptive.
 Working-tree changes on top of the initial import.
 
 ### Added
+- **`gbaimp/widescreen.h`** (`Widescreen`, `WidescreenProfile`, `WidescreenBindings`, `widescreen_viewport`, `widescreen_compute_viewport`, `default_tilemap_provider`, `default_bg_x_provider`, `default_obj_attr_x_provider`) and header-only **`gbaimp/widescreen_gbarecomp.h`**: the generic widescreen core (view / presentation state, provider install and withdrawal, derived `HudAnchoring` state, presented-frame counter, effective viewport, function-entry hook chaining) driven by a game profile and bindings to the runtime's `g_ws_*` values; test `test_widescreen`.
 - **`gbaimp/game_host.h`** (`GameHostConfig`, `install_game_host`, `game_host_stats`, `is_gba_game_texture`, `default_game_viewport`): the generic SDL handlers (game image, colour correction, letterbox, mask, interpolation, performance HUD, audio, diagnostics) with optional host callbacks for what is game specific; test `test_game_host`.
 - **`gbaimp/runtime_ui_glue.h`** (`RuntimeUiGlueOptions`, `create_standard_ui`, `GBAIMP_RUNTIME_UI_WRAP`, `GBAIMP_RUNTIME_UI_RENAME_FORWARDER`): header-only tuning of the runtime settings menu for hosts that build recomp-ui.
 - **SDL interposition layer** (`gbaimp/sdl_interpose.h`): `SdlFunctions` / `SdlHandlers` handler table for `SDL_PollEvent`, `SDL_UpdateTexture`, `SDL_RenderCopy`, `SDL_RenderPresent`,
