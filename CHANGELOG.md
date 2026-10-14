@@ -8,6 +8,7 @@ the project has no tagged release yet, so versions below are descriptive.
 Working-tree changes on top of the initial import.
 
 ### Added
+- **`gbaimp/m4a_music_hook.h`** (`M4aMusicHook`, `HdMusicSink`, `M4aAddresses`, `locate_m4a`, `count_m4a_idents`): HD music trigger driven by the m4a sound engine's song calls, with a ROM-signature locator for the five song-control functions (no fixed addresses); test `test_m4a_music_hook`.
 - **`gbaimp/game_host.h`** (`GameHostConfig`, `install_game_host`, `game_host_stats`, `is_gba_game_texture`, `default_game_viewport`): the generic SDL handlers (game image, colour correction, letterbox, mask, interpolation, performance HUD, audio, diagnostics) with optional host callbacks for what is game specific; test `test_game_host`.
 - **`gbaimp/runtime_ui_glue.h`** (`RuntimeUiGlueOptions`, `create_standard_ui`, `GBAIMP_RUNTIME_UI_WRAP`, `GBAIMP_RUNTIME_UI_RENAME_FORWARDER`): header-only tuning of the runtime settings menu for hosts that build recomp-ui.
 - **SDL interposition layer** (`gbaimp/sdl_interpose.h`): `SdlFunctions` / `SdlHandlers` handler table for `SDL_PollEvent`, `SDL_UpdateTexture`, `SDL_RenderCopy`, `SDL_RenderPresent`,

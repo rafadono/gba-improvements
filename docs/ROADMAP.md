@@ -17,6 +17,7 @@
 - [x] Runnable example host (`examples/minimal_host`), `docs/GBARECOMP_CONTRACT.md`, MIT license.
 
 - [x] Generic SDL host glue (`game_host.h`) and runtime-menu glue (`runtime_ui_glue.h`), so hosts only supply their game-specific callbacks.
+- [x] HD music trigger for the m4a sound engine (`m4a_music_hook.h`) with a ROM-signature locator, so hosts no longer hard-code function addresses.
 
 ## Ideas for the existing modules
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
