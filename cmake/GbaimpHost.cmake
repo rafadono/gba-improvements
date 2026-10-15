@@ -44,8 +44,8 @@
 #
 # Platform effects (identical to what the hosts did by hand)
 #   * GNU ld (not MSVC): -Wl,--wrap for SDL_PollEvent, SDL_RenderPresent, SDL_UpdateTexture,
-#     SDL_RenderCopy, SDL_QueueAudio and SDL_OpenAudioDevice on both targets, plus
-#     recomp_runtime_ui_create_standard on the executable only.
+#     SDL_RenderCopy, SDL_QueueAudio and SDL_OpenAudioDevice, plus
+#     recomp_runtime_ui_create_standard, on both targets.
 #   * MSVC with recomp-ui: no link options (SDL is interposed at run time by
 #     gbaimp::install_sdl_interposers()); recomp_runtime_ui_create_standard is renamed while
 #     compiling recomp_runtime_settings.c, and <PREFIX>_RENAME_RUNTIME_UI_CREATE_STANDARD=1 is defined.
@@ -113,9 +113,10 @@ function(_gbaimp_host_configure_target tgt is_test prefix_lower)
             "-Wl,--wrap=SDL_RenderCopy"
             "-Wl,--wrap=SDL_QueueAudio"
             "-Wl,--wrap=SDL_OpenAudioDevice")
-        if(NOT is_test)
-            list(APPEND _wraps "-Wl,--wrap=recomp_runtime_ui_create_standard")
-        endif()
+        # The menu constructor is wrapped on both targets: the host's runtime_ui_standard.cpp (which
+        # defines __wrap_recomp_runtime_ui_create_standard) is compiled into the unit-test executable
+        # too, and without the flag its __real_ reference cannot be resolved at link time.
+        list(APPEND _wraps "-Wl,--wrap=recomp_runtime_ui_create_standard")
         target_link_options(${tgt} PRIVATE ${_wraps})
     endif()
     set_target_properties(${tgt} PROPERTIES CXX_SCAN_FOR_MODULES OFF)

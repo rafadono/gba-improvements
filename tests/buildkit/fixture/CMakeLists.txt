@@ -153,7 +153,7 @@ else()
         _in("tests wrap ${_w}" t_lo "-Wl,--wrap=${_w}" TRUE)
     endforeach()
     _in("exe wraps recomp_runtime_ui_create_standard" exe_lo "${_wrap_rui}" TRUE)
-    _in("tests do not wrap recomp_runtime_ui_create_standard" t_lo "${_wrap_rui}" FALSE)
+    _in("tests wrap recomp_runtime_ui_create_standard" t_lo "${_wrap_rui}" TRUE)
 endif()
 
 # MSVC rename of the recomp-ui symbol

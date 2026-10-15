@@ -74,7 +74,7 @@ It reads `GBARECOMP_ROOT` (required), `SDL2_INCLUDE_DIR`, `RECOMP_UI_DIR` and `G
 - Links the gbarecomp runtime stack with `target_link_gbarecomp_runtime_stack()` when available, otherwise the four gbarecomp static libraries
   (inside `--start-group` for the executable on GNU ld); `pthread dl m` on Linux.
 - GNU ld: `-Wl,--wrap=` for `SDL_PollEvent`, `SDL_RenderPresent`, `SDL_UpdateTexture`, `SDL_RenderCopy`, `SDL_QueueAudio`, `SDL_OpenAudioDevice`
-  (and `recomp_runtime_ui_create_standard` on the executable only). MSVC: no link options; with recomp-ui, `recomp_runtime_ui_create_standard` is renamed
+  (and `recomp_runtime_ui_create_standard`, on both targets because the host's `runtime_ui_standard.cpp` is compiled into the tests too). MSVC: no link options; with recomp-ui, `recomp_runtime_ui_create_standard` is renamed
   to `<prefix>_real_recomp_runtime_ui_create_standard` while compiling `recomp_runtime_settings.c` and `<PREFIX>_RENAME_RUNTIME_UI_CREATE_STANDARD=1` is defined
   on both targets.
 - `CXX_SCAN_FOR_MODULES OFF`; post-build copy of the executable to the source root and of `third_party/sdl2/lib/x64/SDL2.dll` (when present) next
