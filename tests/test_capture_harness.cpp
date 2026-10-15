@@ -396,6 +396,161 @@ void test_exit_frame_and_variants() {
     SDL_Quit();
 }
 
+// --- savestates addressed by PPU frame ----------------------------------------------------------
+std::string script_of(const std::vector<SavestatePumpEvent>& v, bool fast = false) { return build_assist_script(fast, v); }
+
+void test_savestate_ppu_frames() {
+    // Parser.
+    std::vector<SavestateRequest> r;
+    std::string err;
+    CHECK(parse_savestate_requests("300:1,900:2; 1200 ", &r, &err));
+    CHECK_EQ(r.size(), 3u);
+    CHECK(r[0].ppu_frame == 300 && r[0].slot == 1 && r[1].ppu_frame == 900 && r[1].slot == 2);
+    CHECK(r[2].ppu_frame == 1200 && r[2].slot == 1);           // slot defaults to 1
+    CHECK(!parse_savestate_requests("", &r, &err) && !err.empty());
+    CHECK(!parse_savestate_requests("abc", &r, &err) && err.find("abc") != std::string::npos);
+    CHECK(!parse_savestate_requests("10:0", &r, &err) && err.find("out of range") != std::string::npos);
+    CHECK(!parse_savestate_requests("10:11", &r, &err));
+    CHECK(!parse_savestate_requests("10:x", &r, &err));
+    CHECK(!parse_savestate_requests("-5:1", &r, &err));
+
+    // Offsets: from a boot the pump is the frame plus the bias; from a state loaded at frame F it is G - F + bias.
+    std::vector<SavestatePumpEvent> ev;
+    CHECK(plan_savestate_pumps({{300, 1}}, false, 0, &ev, &err));
+    CHECK_EQ(ev.size(), 1u);
+    CHECK_EQ(ev[0].pump, 299u);                                  // measured: pump P holds frame P + 1
+    CHECK(!plan_savestate_pumps({{2, 1}}, false, 0, &ev, &err) && err.find("already passed") != std::string::npos);
+    CHECK(plan_savestate_pumps({{3, 1}}, false, 0, &ev, &err) && ev[0].pump == 2u);
+    CHECK(plan_savestate_pumps({{25100, 3}}, true, 25000, &ev, &err));
+    CHECK_EQ(ev[0].pump, 102u);
+    CHECK_EQ(ev[0].slot, 3);
+    CHECK_EQ(ev[0].ppu_frame, 25100u);
+    // Saving on the very frame that was loaded is the earliest possible save (pump 2).
+    CHECK(plan_savestate_pumps({{25000, 1}}, true, 25000, &ev, &err));
+    CHECK_EQ(ev[0].pump, 2u);
+
+    // Several slots, given out of order: sorted by frame / pump, slots kept.
+    CHECK(plan_savestate_pumps({{900, 2}, {300, 1}, {600, 4}}, true, 100, &ev, &err));
+    CHECK_EQ(ev.size(), 3u);
+    CHECK(ev[0].ppu_frame == 300 && ev[1].ppu_frame == 600 && ev[2].ppu_frame == 900);
+    CHECK(ev[0].slot == 1 && ev[1].slot == 4 && ev[2].slot == 2);
+    CHECK(ev[0].pump < ev[1].pump && ev[1].pump < ev[2].pump);
+    CHECK_EQ(ev[2].pump, 802u);
+
+    // Frames already passed are an error that says so.
+    CHECK(!plan_savestate_pumps({{99, 1}}, true, 100, &ev, &err));
+    CHECK(err.find("already passed") != std::string::npos && err.find("100") != std::string::npos);
+    CHECK(ev.empty());
+    // One bad entry rejects the whole plan.
+    CHECK(!plan_savestate_pumps({{500, 1}, {50, 2}}, true, 100, &ev, &err));
+    // Two saves on one frame, one slot twice.
+    CHECK(!plan_savestate_pumps({{500, 1}, {500, 2}}, false, 0, &ev, &err));
+    CHECK(err.find("two saves") != std::string::npos);
+    CHECK(!plan_savestate_pumps({{500, 2}, {600, 2}}, false, 0, &ev, &err));
+    CHECK(err.find("used twice") != std::string::npos);
+    CHECK(!plan_savestate_pumps({{500, 12}}, false, 0, &ev, &err));
+
+    // Script text (same shape as before for one save).
+    CHECK(plan_savestate_pumps({{500, 3}, {900, 1}}, false, 0, &ev, &err));
+    CHECK_EQ(script_of(ev), std::string("499:save3;899:save1"));
+    CHECK_EQ(script_of(ev, true), std::string("1:fast_on;499:save3;899:save1;900:fast_off"));
+    CHECK_EQ(script_of({}, true), std::string("1:fast_on"));
+    CHECK_EQ(script_of({}), std::string());
+
+    // Sidecar format.
+    std::uint64_t f = 0;
+    CHECK_EQ(savestate_meta_path("a/b.state1"), std::string("a/b.state1.meta"));
+    CHECK(parse_savestate_meta(format_savestate_meta(123456), &f) && f == 123456u);
+    CHECK(parse_savestate_meta("# note\r\nppu_frame = 77\r\n", &f) && f == 77u);
+    CHECK(!parse_savestate_meta("", &f));
+    CHECK(!parse_savestate_meta("ppu_frame=\n", &f));
+    CHECK(!parse_savestate_meta("ppu_frame=12x\n", &f));
+}
+
+void test_savestate_ppu_env() {
+    testh::TempDir tmp("sspu");
+    const std::string state = tmp.file("loaded.state");
+    { std::ofstream o(state, std::ios::binary); o << "x"; }
+
+    // Explicit loaded frame, two slots, fast-forward.
+    fake_env().clear();
+    fake_env()["ABC_SAVESTATE_LOAD"] = state;
+    fake_env()["ABC_SAVESTATE_LOAD_PPU_FRAME"] = "25000";
+    fake_env()["ABC_SAVESTATE_SAVE_PPU"] = "25200:2,25100:1";
+    fake_env()["ABC_FAST"] = "1";
+    cfg_with("ABC");
+    CHECK(active());
+    auto args = extra_runtime_args();
+    CHECK(args.size() == 2 && args[0] == "--load-state");
+    CHECK_EQ(std::string(fake_env()["GBARECOMP_ASSIST_SCRIPT"]),
+             std::string("1:fast_on;102:save1;202:save2;203:fast_off"));
+    CHECK(configuration_error().empty());
+
+    // The sidecar of the loaded file is used when the variable is absent.
+    { std::ofstream o(savestate_meta_path(state), std::ios::binary); o << format_savestate_meta(5000); }
+    fake_env().clear();
+    fake_env()["ABC_SAVESTATE_LOAD"] = state;
+    fake_env()["ABC_SAVESTATE_SAVE_PPU"] = "5010";
+    cfg_with("ABC");
+    extra_runtime_args();
+    CHECK_EQ(std::string(fake_env()["GBARECOMP_ASSIST_SCRIPT"]), std::string("12:save1"));
+
+    // Without a sidecar or a variable the frame is unknown: clear error, no script.
+    fake_env().clear();
+    fake_env()["ABC_SAVESTATE_LOAD"] = tmp.file("nometa.state");
+    fake_env()["ABC_SAVESTATE_SAVE_PPU"] = "5010:1";
+    cfg_with("ABC");
+    extra_runtime_args();
+    CHECK(fake_env().find("GBARECOMP_ASSIST_SCRIPT") == fake_env().end());
+    CHECK(configuration_error().find("ABC_SAVESTATE_LOAD_PPU_FRAME") != std::string::npos);
+
+    // A frame already passed.
+    fake_env().clear();
+    fake_env()["ABC_SAVESTATE_LOAD"] = state;
+    fake_env()["ABC_SAVESTATE_LOAD_PPU_FRAME"] = "6000";
+    fake_env()["ABC_SAVESTATE_SAVE_PPU"] = "5000:1";
+    cfg_with("ABC");
+    extra_runtime_args();
+    CHECK(fake_env().find("GBARECOMP_ASSIST_SCRIPT") == fake_env().end());
+    CHECK(configuration_error().find("already passed") != std::string::npos);
+
+    // Fresh boot: the frame is absolute, no load needed. The sidecar is written next to the slot file
+    // (<rom>.state<N>.meta) once the file exists and the frame has been passed.
+    fake_env().clear();
+    fake_env()["ABC_SAVESTATE_SAVE_PPU"] = "300:3";
+    fake_env()["ABC_SAVESTATE_ROM"] = tmp.file("game.gba");
+    cfg_with("ABC");
+    extra_runtime_args();
+    CHECK_EQ(std::string(fake_env()["GBARECOMP_ASSIST_SCRIPT"]), std::string("299:save3"));
+    const std::string slot = tmp.file("game.state3");
+    on_emulated_frame(301);                                       // the runtime has not written the file yet
+    CHECK(!std::filesystem::exists(savestate_meta_path(slot)));
+    { std::ofstream o(slot, std::ios::binary); o << "state"; }
+    on_emulated_frame(300);                                       // frame not past the save yet
+    CHECK(!std::filesystem::exists(savestate_meta_path(slot)));
+    on_emulated_frame(302);
+    std::ifstream in(savestate_meta_path(slot), std::ios::binary);
+    std::stringstream ss; ss << in.rdbuf();
+    std::uint64_t f = 0;
+    CHECK(parse_savestate_meta(ss.str(), &f) && f == 300u);
+    // The saved state can be loaded and saved again: its frame comes from the sidecar.
+    fake_env().clear();
+    fake_env()["ABC_SAVESTATE_LOAD"] = slot;
+    fake_env()["ABC_SAVESTATE_SAVE_PPU"] = "350:1";
+    cfg_with("ABC");
+    extra_runtime_args();
+    CHECK_EQ(std::string(fake_env()["GBARECOMP_ASSIST_SCRIPT"]), std::string("52:save1"));
+
+    // The legacy pump-based variable still works and can be combined with the new one.
+    fake_env().clear();
+    fake_env()["ABC_SAVESTATE_SAVE"] = "10:5";
+    fake_env()["ABC_SAVESTATE_SAVE_PPU"] = "300:6";
+    cfg_with("ABC");
+    extra_runtime_args();
+    CHECK_EQ(std::string(fake_env()["GBARECOMP_ASSIST_SCRIPT"]),
+             std::string("10:save5;299:save6"));
+}
+
 }  // namespace
 
 int main() {
@@ -406,5 +561,7 @@ int main() {
     test_env_prefix();
     test_capture_arming();
     test_exit_frame_and_variants();
+    test_savestate_ppu_frames();
+    test_savestate_ppu_env();
     return testh::finish("capture_harness");
 }

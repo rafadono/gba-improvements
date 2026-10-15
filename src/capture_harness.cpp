@@ -72,6 +72,18 @@ struct State {
     // settings / savestate
     std::vector<std::pair<std::string, int>> sets;
     std::string savestate_load, savestate_save, fast;
+    // savestates addressed by PPU frame
+    std::string savestate_save_ppu, savestate_load_ppu_frame, savestate_rom;
+    struct MetaJob {
+        std::uint64_t ppu_frame = 0;
+        std::string state_path;
+    };
+    std::vector<MetaJob> meta_jobs;     // sidecars still to write (the state file must exist)
+    bool have_loaded_frame = false;     // frame of the loaded state is known
+    std::uint64_t loaded_frame = 0;
+    bool loaded_frame_checked = false;
+    bool fatal = false;                 // a savestate variable could not be honoured
+    std::string error;
 
     // runtime
     std::atomic<std::uint64_t> frame{0};
@@ -176,11 +188,15 @@ void init_from_env(State& s) {
     if (const char* v = env(s, "CAPTURE_VARIANTS")) s.variants = parse_variants(v);
     if (const char* p = env(s, "SAVESTATE_LOAD")) s.savestate_load = p;
     if (const char* p = env(s, "SAVESTATE_SAVE")) s.savestate_save = p;
+    if (const char* p = env(s, "SAVESTATE_SAVE_PPU")) s.savestate_save_ppu = p;
+    if (const char* p = env(s, "SAVESTATE_LOAD_PPU_FRAME")) s.savestate_load_ppu_frame = p;
+    if (const char* p = env(s, "SAVESTATE_ROM")) s.savestate_rom = p;
+    else if (s.cfg.rom_path) s.savestate_rom = s.cfg.rom_path;
     if (const char* p = env(s, "FAST")) s.fast = p;
     if (!s.frames.empty() && s.dir.empty()) s.dir = "captures";
     s.any = !s.push_keys.empty() || !s.dir.empty() || !s.frames.empty() || !s.rules.empty() ||
             s.win_w > 0 || !s.sets.empty() || !s.savestate_load.empty() || !s.savestate_save.empty() ||
-            s.have_exit_frame || !s.fast.empty();
+            !s.savestate_save_ppu.empty() || s.have_exit_frame || !s.fast.empty();
     if (s.any) {
         std::fprintf(stderr,
                      "[%s] harness ON: dir=%s frames=%zu mode=%s%s window=%dx%d input_rules=%zu sets=%zu\n",
@@ -408,6 +424,150 @@ std::vector<Variant> parse_variants(const std::string& text) {
     return out;
 }
 
+bool parse_savestate_requests(const std::string& text, std::vector<SavestateRequest>* out,
+                              std::string* error) {
+    if (!out) return false;
+    out->clear();
+    std::string cur;
+    std::vector<std::string> items;
+    for (char c : text + ",") {
+        if (c == ',' || c == ';' || c == '\n' || c == ' ' || c == '\t') {
+            if (!cur.empty()) items.push_back(cur);
+            cur.clear();
+        } else {
+            cur.push_back(c);
+        }
+    }
+    for (const std::string& it : items) {
+        const size_t colon = it.find(':');
+        const std::string f = it.substr(0, colon);
+        const std::string sl = colon == std::string::npos ? std::string("1") : it.substr(colon + 1);
+        auto all_digits = [](const std::string& t) {
+            if (t.empty() || t.size() > 18) return false;
+            for (char ch : t) {
+                if (ch < '0' || ch > '9') return false;
+            }
+            return true;
+        };
+        if (!all_digits(f) || !all_digits(sl)) {
+            if (error) *error = "bad entry \"" + it + "\" (expected <ppu_frame>[:<slot>])";
+            out->clear();
+            return false;
+        }
+        const unsigned long long slot = std::strtoull(sl.c_str(), nullptr, 10);
+        if (slot < static_cast<unsigned>(kSavestateMinSlot) || slot > static_cast<unsigned>(kSavestateMaxSlot)) {
+            if (error) *error = "slot " + sl + " out of range 1..10 in \"" + it + "\"";
+            out->clear();
+            return false;
+        }
+        SavestateRequest r;
+        r.ppu_frame = std::strtoull(f.c_str(), nullptr, 10);
+        r.slot = static_cast<int>(slot);
+        out->push_back(r);
+    }
+    if (out->empty()) {
+        if (error) *error = "no save requests";
+        return false;
+    }
+    return true;
+}
+
+bool plan_savestate_pumps(const std::vector<SavestateRequest>& requests, bool from_state,
+                          std::uint64_t loaded_ppu_frame, std::vector<SavestatePumpEvent>* out,
+                          std::string* error) {
+    if (!out) return false;
+    out->clear();
+    // The first pump the runtime accepts is 2: from a boot that is PPU frame 3.
+    const std::uint64_t first_frame = from_state ? loaded_ppu_frame : 2 + kSavestateBootPumpBias;
+    const std::uint64_t pump_of_first = 2;
+    std::vector<SavestateRequest> sorted = requests;
+    std::stable_sort(sorted.begin(), sorted.end(),
+                     [](const SavestateRequest& a, const SavestateRequest& b) { return a.ppu_frame < b.ppu_frame; });
+    for (size_t i = 0; i < sorted.size(); ++i) {
+        const SavestateRequest& r = sorted[i];
+        if (r.slot < kSavestateMinSlot || r.slot > kSavestateMaxSlot) {
+            if (error) *error = "slot " + std::to_string(r.slot) + " out of range 1..10";
+            out->clear();
+            return false;
+        }
+        if (r.ppu_frame < first_frame) {
+            if (error) {
+                *error = "PPU frame " + std::to_string(r.ppu_frame) + " has already passed: the run " +
+                         (from_state ? "starts from a state at frame " : "cannot save before frame ") +
+                         std::to_string(first_frame) + " (the earliest save)";
+            }
+            out->clear();
+            return false;
+        }
+        if (i > 0 && sorted[i - 1].ppu_frame == r.ppu_frame) {
+            if (error) {
+                *error = "two saves at PPU frame " + std::to_string(r.ppu_frame) + " (slots " +
+                         std::to_string(sorted[i - 1].slot) + " and " + std::to_string(r.slot) +
+                         "): the runtime saves one slot per frame";
+            }
+            out->clear();
+            return false;
+        }
+        for (size_t j = 0; j < i; ++j) {
+            if (sorted[j].slot == r.slot) {
+                if (error) {
+                    *error = "slot " + std::to_string(r.slot) + " is used twice (frames " +
+                             std::to_string(sorted[j].ppu_frame) + " and " + std::to_string(r.ppu_frame) +
+                             "): the second save would overwrite the first";
+                }
+                out->clear();
+                return false;
+            }
+        }
+        SavestatePumpEvent e;
+        e.pump = r.ppu_frame - first_frame + pump_of_first;
+        e.slot = r.slot;
+        e.ppu_frame = r.ppu_frame;
+        out->push_back(e);
+    }
+    return true;
+}
+
+std::string build_assist_script(bool fast_forward, const std::vector<SavestatePumpEvent>& saves) {
+    std::string script;
+    if (fast_forward) script += "1:fast_on";
+    std::uint64_t last = 0;
+    for (const SavestatePumpEvent& e : saves) {
+        if (!script.empty()) script += ";";
+        script += std::to_string(e.pump) + ":save" + std::to_string(e.slot);
+        last = std::max(last, e.pump);
+    }
+    if (fast_forward && !saves.empty()) script += ";" + std::to_string(last + 1) + ":fast_off";
+    return script;
+}
+
+std::string savestate_meta_path(const std::string& state_path) { return state_path + ".meta"; }
+
+std::string format_savestate_meta(std::uint64_t ppu_frame) {
+    return "ppu_frame=" + std::to_string(ppu_frame) + "\n";
+}
+
+bool parse_savestate_meta(const std::string& text, std::uint64_t* ppu_frame) {
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.rfind("ppu_frame", 0) != 0) continue;
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string v = trim(line.substr(eq + 1));
+        if (v.empty() || v.size() > 18) return false;
+        for (char ch : v) {
+            if (ch < '0' || ch > '9') return false;
+        }
+        if (ppu_frame) *ppu_frame = std::strtoull(v.c_str(), nullptr, 10);
+        return true;
+    }
+    return false;
+}
+
+const std::string& configuration_error() { return ensure().error; }
+
 std::string frame_label(std::uint64_t f) {
     char b[32];
     std::snprintf(b, sizeof(b), "f%06llu", static_cast<unsigned long long>(f));
@@ -440,6 +600,15 @@ void configure(const CaptureConfig& config) {
     s.exit_after_capture = false;
     s.exit_frame = 0;
     s.have_exit_frame = false;
+    s.savestate_save_ppu.clear();
+    s.savestate_load_ppu_frame.clear();
+    s.savestate_rom.clear();
+    s.meta_jobs.clear();
+    s.have_loaded_frame = false;
+    s.loaded_frame = 0;
+    s.loaded_frame_checked = false;
+    s.fatal = false;
+    s.error.clear();
     s.win_w = s.win_h = 0;
     s.win_applied_presents = 0;
     s.rules.clear();
@@ -469,6 +638,60 @@ void set_setting_callback(int (*cb)(const char* key, int value)) {
     ensure().cfg.apply_setting = cb;
 }
 
+namespace {
+
+void fail(State& s, const std::string& message) {
+    std::fprintf(stderr, "[%s] ERROR %s\n", s.log_tag.c_str(), message.c_str());
+    s.fatal = true;
+    if (!s.error.empty()) s.error += "; ";
+    s.error += message;
+}
+
+// Frame of the state loaded at start-up: the explicit variable wins, then the ".meta" sidecar of
+// the loaded file, and a run without a loaded state starts at frame 0.
+bool resolve_loaded_frame(State& s, std::string* err) {
+    s.have_loaded_frame = false;
+    s.loaded_frame = 0;
+    if (!s.savestate_load_ppu_frame.empty()) {
+        char* end = nullptr;
+        const unsigned long long v = std::strtoull(s.savestate_load_ppu_frame.c_str(), &end, 10);
+        if (end == s.savestate_load_ppu_frame.c_str() || *end != '\0') {
+            *err = var_name(s, "SAVESTATE_LOAD_PPU_FRAME") + ": not a frame number: " + s.savestate_load_ppu_frame;
+            return false;
+        }
+        s.loaded_frame = v;
+        s.have_loaded_frame = true;
+        return true;
+    }
+    if (s.savestate_load.empty()) {
+        s.have_loaded_frame = true;  // fresh boot
+        return true;
+    }
+    std::ifstream in(savestate_meta_path(s.savestate_load), std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    std::uint64_t f = 0;
+    if (in && parse_savestate_meta(ss.str(), &f)) {
+        s.loaded_frame = f;
+        s.have_loaded_frame = true;
+        return true;
+    }
+    *err = "the PPU frame of the loaded state " + s.savestate_load + " is unknown (no readable " +
+           savestate_meta_path(s.savestate_load) + "): set " + var_name(s, "SAVESTATE_LOAD_PPU_FRAME") +
+           " to the frame it was saved at";
+    return false;
+}
+
+// Where the runtime writes a slot: the ROM path with the extension replaced by ".state<N>".
+std::string slot_file_path(const State& s, int slot) {
+    if (s.savestate_rom.empty()) return std::string();
+    std::filesystem::path p(s.savestate_rom);
+    p.replace_extension(".state" + std::to_string(slot));
+    return p.string();
+}
+
+}  // namespace
+
 std::vector<std::string> extra_runtime_args() {
     State& s = ensure();
     std::vector<std::string> a;
@@ -480,16 +703,55 @@ std::vector<std::string> extra_runtime_args() {
     // ("<pump>:<action>;..."). One pump == one emulated frame of the main loop.
     std::string script;
     const bool fast = !s.fast.empty() && s.fast != "0";
-    if (fast) script += "1:fast_on";
+    std::vector<SavestatePumpEvent> saves;
     if (!s.savestate_save.empty()) {
+        // Legacy form: the number counts pumps since the process started.
         const size_t c = s.savestate_save.find(':');
         const unsigned long long frame = std::strtoull(s.savestate_save.c_str(), nullptr, 10);
         const int slot = c == std::string::npos ? 1 : std::atoi(s.savestate_save.c_str() + c + 1);
-        const unsigned long long at = std::max<unsigned long long>(frame, 2);
-        if (!script.empty()) script += ";";
-        script += std::to_string(at) + ":save" + std::to_string(slot < 1 ? 1 : slot);
-        if (fast) script += ";" + std::to_string(at + 1) + ":fast_off";
+        SavestatePumpEvent e;
+        e.pump = std::max<unsigned long long>(frame, 2);
+        e.slot = slot < 1 ? 1 : slot;
+        saves.push_back(e);
     }
+    if (!s.savestate_save_ppu.empty()) {
+        std::vector<SavestateRequest> reqs;
+        std::string err;
+        if (!parse_savestate_requests(s.savestate_save_ppu, &reqs, &err)) {
+            fail(s, var_name(s, "SAVESTATE_SAVE_PPU") + ": " + err);
+        } else if (!resolve_loaded_frame(s, &err)) {
+            fail(s, err);
+        } else {
+            std::vector<SavestatePumpEvent> planned;
+            if (!plan_savestate_pumps(reqs, !s.savestate_load.empty(), s.loaded_frame, &planned, &err)) {
+                fail(s, var_name(s, "SAVESTATE_SAVE_PPU") + ": " + err);
+            } else {
+                for (const SavestatePumpEvent& e : planned) {
+                    saves.push_back(e);
+                    std::fprintf(stderr, "[%s] save slot %d at PPU frame %llu = pump %llu (state loaded at frame %llu)\n",
+                                 s.log_tag.c_str(), e.slot, static_cast<unsigned long long>(e.ppu_frame),
+                                 static_cast<unsigned long long>(e.pump),
+                                 static_cast<unsigned long long>(s.loaded_frame));
+                    const std::string path = slot_file_path(s, e.slot);
+                    if (path.empty()) {
+                        std::fprintf(stderr, "[%s] no .meta sidecar for slot %d: set %s (or CaptureConfig::rom_path)\n",
+                                     s.log_tag.c_str(), e.slot, var_name(s, "SAVESTATE_ROM").c_str());
+                    } else {
+                        s.meta_jobs.push_back({e.ppu_frame, path});
+                    }
+                }
+            }
+        }
+    }
+    if (s.fatal) {
+        // Do not run a different experiment than the one asked for: no savestate script at all.
+        saves.clear();
+        s.meta_jobs.clear();
+    } else if (!saves.empty()) {
+        std::stable_sort(saves.begin(), saves.end(),
+                         [](const SavestatePumpEvent& x, const SavestatePumpEvent& y) { return x.pump < y.pump; });
+    }
+    script = build_assist_script(fast, saves);
     // Scripted input goes through the runtime's deterministic input-trace replay
     // (GBARECOMP_INPUT_REPLAY, frame-indexed by the PPU frame counter). Writing KEYINPUT from the
     // per-frame hook is not enough: the host pump overwrites it before the guest reads it.
@@ -528,6 +790,40 @@ void on_emulated_frame(std::uint64_t hw_frame_count) {
     // restores its own value).
     const std::uint64_t f = hw_frame_count;
     s.frame.store(f);
+    // The host also reports the frames of the boot that precede the state load (0, 1, 2...), so the
+    // check starts at the first frame beyond that unless the state itself is that early.
+    if (!s.loaded_frame_checked && s.have_loaded_frame && !s.savestate_load.empty() &&
+        (f > 5 || s.loaded_frame <= 5)) {
+        // Self-check of the frame the translation relied on: the first frame the host reports after
+        // a state load should be the state's own (a few frames of start-up slack are fine).
+        s.loaded_frame_checked = true;
+        const std::uint64_t d = f > s.loaded_frame ? f - s.loaded_frame : s.loaded_frame - f;
+        if (d > 5) {
+            std::fprintf(stderr,
+                         "[%s] WARNING the loaded state reports PPU frame %llu but %llu was assumed "
+                         "(wrong %s or stale .meta): saves by PPU frame will land off target\n",
+                         s.log_tag.c_str(), static_cast<unsigned long long>(f),
+                         static_cast<unsigned long long>(s.loaded_frame),
+                         var_name(s, "SAVESTATE_LOAD_PPU_FRAME").c_str());
+        }
+    }
+    // Sidecars of the saves requested by PPU frame: written once the state file exists and the
+    // frame has been reached.
+    for (size_t i = 0; i < s.meta_jobs.size();) {
+        const State::MetaJob& job = s.meta_jobs[i];
+        std::error_code ec;
+        if (f > job.ppu_frame && std::filesystem::exists(job.state_path, ec)) {
+            std::ofstream out(savestate_meta_path(job.state_path), std::ios::binary | std::ios::trunc);
+            out << format_savestate_meta(job.ppu_frame);
+            out.close();
+            std::fprintf(stderr, "[%s] wrote %s (ppu_frame=%llu)\n", s.log_tag.c_str(),
+                         savestate_meta_path(job.state_path).c_str(),
+                         static_cast<unsigned long long>(job.ppu_frame));
+            s.meta_jobs.erase(s.meta_jobs.begin() + static_cast<std::ptrdiff_t>(i));
+        } else {
+            ++i;
+        }
+    }
     while (s.next_target < s.frames.size() && s.frames[s.next_target] <= f) {
         const std::uint64_t t = s.frames[s.next_target++];
         if (s.want_output) {

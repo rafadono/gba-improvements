@@ -20,7 +20,9 @@ param(
     [string]$Variants = "",                 # "852x480 key=0|960x640": one output image per entry
     [ValidateSet("output","native","both")][string]$Mode = "output",
     [string]$LoadState = "",
-    [string]$SaveState = "",                # "<frame>:<slot>"
+    [string]$SaveState = "",                # "<pump>:<slot>" (pump count since process start)
+    [string]$SavePpu = "",                  # "300:1,900:2": save slots at absolute PPU frames
+    [string]$LoadPpuFrame = "",             # PPU frame of -LoadState (default: its .meta sidecar; 0 = boot)
     [switch]$Fast,
     [string]$ExtraArgs = "",
     [int]$ExitFrame = 0,
@@ -47,6 +49,10 @@ if ($Window) { Set-HostVar WINDOW_SIZE $Window }
 if ($Variants) { Set-HostVar CAPTURE_VARIANTS $Variants }
 if ($LoadState) { Set-HostVar SAVESTATE_LOAD (Resolve-Path $LoadState).Path }
 if ($SaveState) { Set-HostVar SAVESTATE_SAVE $SaveState }
+if ($SavePpu) { Set-HostVar SAVESTATE_SAVE_PPU $SavePpu }
+if ($LoadPpuFrame) { Set-HostVar SAVESTATE_LOAD_PPU_FRAME $LoadPpuFrame }
+# Where the runtime writes the slots (<rom>.state<N>): lets the host write the .meta sidecars.
+if ($SavePpu -and $Rom -and (Test-Path $Rom)) { Set-HostVar SAVESTATE_ROM (Resolve-Path $Rom).Path }
 if ($Fast) { Set-HostVar FAST "1" }
 if ($ExitFrame -gt 0) { Set-HostVar EXIT_FRAME "$ExitFrame" }
 

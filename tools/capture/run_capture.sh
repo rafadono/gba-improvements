@@ -11,17 +11,19 @@
 #   -s SCRIPT   input script file or inline text      -S SET     "key=v;key=v" (host settings)
 #   -w WxH      output size (e.g. 852x480)            -m MODE    output|native|both
 #   -V VARIANTS "852x480 key=0|960x640" (one output image per entry at each captured frame)
-#   -l STATE    load savestate file                   -v FRAME:SLOT  save state
+#   -l STATE    load savestate file                   -v PUMP:SLOT  save state (pump count since process start)
+#   -P LIST     save states by PPU frame "300:1,900:2" (<PREFIX>_SAVESTATE_SAVE_PPU)
+#   -L FRAME    PPU frame of the file given with -l (default: read from its .meta sidecar, 0 = boot)
 #   -F          fast-forward                          -x FRAME   quit at emulated frame
 #   -t SEC      timeout (default 240)                 -a ARGS    extra arguments for the host
 set -euo pipefail
 PREFIX=${CAPTURE_PREFIX:-} EXE= ROM= BIOS= EXTRA=
-DIR=captures/run VARIANTS= FRAMES= SCRIPT= SETS= WIN= MODE=output LOAD= SAVE= FAST= EXITF= TMO=240
-while getopts "p:e:r:b:d:f:s:S:w:V:m:l:v:Fx:t:a:" o; do
+DIR=captures/run VARIANTS= FRAMES= SCRIPT= SETS= WIN= MODE=output LOAD= SAVE= SAVEPPU= LOADPPU= FAST= EXITF= TMO=240
+while getopts "p:e:r:b:d:f:s:S:w:V:m:l:v:P:L:Fx:t:a:" o; do
   case $o in
     p) PREFIX=$OPTARG;; e) EXE=$OPTARG;; r) ROM=$OPTARG;; b) BIOS=$OPTARG;; d) DIR=$OPTARG;;
     f) FRAMES=$OPTARG;; s) SCRIPT=$OPTARG;; S) SETS=$OPTARG;; w) WIN=$OPTARG;; V) VARIANTS=$OPTARG;;
-    m) MODE=$OPTARG;; l) LOAD=$OPTARG;; v) SAVE=$OPTARG;; F) FAST=1;; x) EXITF=$OPTARG;;
+    m) MODE=$OPTARG;; l) LOAD=$OPTARG;; v) SAVE=$OPTARG;; P) SAVEPPU=$OPTARG;; L) LOADPPU=$OPTARG;; F) FAST=1;; x) EXITF=$OPTARG;;
     t) TMO=$OPTARG;; a) EXTRA=$OPTARG;;
     *) exit 2;;
   esac
@@ -41,6 +43,10 @@ setv CAPTURE_MODE "$MODE"
 [ -n "$VARIANTS" ] && setv CAPTURE_VARIANTS "$VARIANTS"
 [ -n "$LOAD" ] && setv SAVESTATE_LOAD "$PWD/$LOAD"
 [ -n "$SAVE" ] && setv SAVESTATE_SAVE "$SAVE"
+[ -n "$SAVEPPU" ] && setv SAVESTATE_SAVE_PPU "$SAVEPPU"
+[ -n "$LOADPPU" ] && setv SAVESTATE_LOAD_PPU_FRAME "$LOADPPU"
+# Where the runtime writes the slots (<rom>.state<N>): lets the host write the .meta sidecars.
+[ -n "$ROM" ] && [ -n "$SAVEPPU" ] && setv SAVESTATE_ROM "$(cd "$(dirname "$ROM")" && pwd)/$(basename "$ROM")"
 [ -n "$FAST" ] && setv FAST 1
 [ -n "$EXITF" ] && setv EXIT_FRAME "$EXITF"
 ARGS=()

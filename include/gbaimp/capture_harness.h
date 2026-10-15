@@ -37,6 +37,10 @@ struct CaptureConfig {
     // Environment access, overridable for tests. nullptr uses std::getenv / the C runtime.
     const char* (*getenv_fn)(const char* name) = nullptr;
     void (*setenv_fn)(const char* name, const char* value) = nullptr;
+    // Path of the ROM file. Only used to find where the runtime writes its savestate slots
+    // (<rom without extension>.state<N>) so the ".meta" sidecar of <P>_SAVESTATE_SAVE_PPU can be
+    // written next to them. The variable <P>_SAVESTATE_ROM overrides it. Optional.
+    const char* rom_path = nullptr;
 };
 
 // Parses the environment (once per call) and resets all harness state. Calling a hook
@@ -69,6 +73,11 @@ void set_setting_callback(int (*cb)(const char* key, int value));
 // exports GBARECOMP_ASSIST_SCRIPT (savestate save, fast-forward) and GBARECOMP_INPUT_REPLAY
 // (the expanded input script) for the runtime to pick up.
 std::vector<std::string> extra_runtime_args();
+
+// Non-empty when a variable could not be honoured (for example <P>_SAVESTATE_SAVE_PPU asks for a
+// frame that has already passed). The problem is also printed on stderr as "ERROR ...", and the
+// affected savestate saves are not scheduled. Valid after extra_runtime_args().
+const std::string& configuration_error();
 
 // --- pure helpers (no SDL, no global state), public for tests and tools -----------------
 
@@ -113,6 +122,49 @@ std::string frame_label(std::uint64_t frame);
 // Variant spec to a file name fragment: keeps letters, digits, x and _; space , = become _
 // ("852x480 screen_mask=0" -> "852x480_screen_mask_0").
 std::string sanitize_variant(const std::string& spec);
+
+// --- savestates by PPU frame ---------------------------------------------------------------
+
+// The runtime's assist script ("<pump>:save<slot>", GBARECOMP_ASSIST_SCRIPT) counts pumps of the
+// host loop since the process started, not PPU frames. Measured on the runtime (one pump per
+// emulated frame, with or without fast-forward):
+//   fresh boot                        the state saved at pump P holds PPU frame P + 1
+//   run started from a state at frame L   the state saved at pump P holds PPU frame L + P - 2
+// (L is the frame the runtime reports when it loads that state). The first allowed pump is 2.
+constexpr std::uint64_t kSavestateLoadPumpBias = 2;           // pump = G - L + 2 after a state load
+constexpr std::uint64_t kSavestateBootPumpBias = 1;           // pump = G - 1 from a fresh boot
+// The runtime accepts slots 1..10.
+constexpr int kSavestateMinSlot = 1;
+constexpr int kSavestateMaxSlot = 10;
+
+struct SavestateRequest {
+    std::uint64_t ppu_frame = 0;  // absolute PPU frame to save at
+    int slot = 1;                 // runtime slot, 1..10
+};
+struct SavestatePumpEvent {
+    std::uint64_t pump = 0;       // assist-script pump index
+    int slot = 1;
+    std::uint64_t ppu_frame = 0;  // the request it came from
+};
+
+// "300:1,900:2" (separators ',' ';' or whitespace; slot optional, default 1). Entries are kept in
+// the order given. False with a message in *error for an unparsable entry or a slot out of range.
+bool parse_savestate_requests(const std::string& text, std::vector<SavestateRequest>* out,
+                              std::string* error);
+// Pure translation of absolute PPU frames to pumps. `from_state` false: the run boots from the
+// ROM (loaded_ppu_frame is ignored); true: it starts from a state at `loaded_ppu_frame`. Output is
+// sorted by pump. Errors (false, message in *error): a frame that has already passed (before the
+// loaded frame, or before the first possible save), two saves on the same frame, one slot used
+// twice. The runtime performs one save per pump, hence no two events share a pump.
+bool plan_savestate_pumps(const std::vector<SavestateRequest>& requests, bool from_state,
+                          std::uint64_t loaded_ppu_frame, std::vector<SavestatePumpEvent>* out,
+                          std::string* error);
+// "1:fast_on;<pump>:save<slot>;...;<last+1>:fast_off" (the fast-forward parts only when asked).
+std::string build_assist_script(bool fast_forward, const std::vector<SavestatePumpEvent>& saves);
+// Sidecar of a savestate file: the file name plus ".meta", text "ppu_frame=<n>" plus a line feed.
+std::string savestate_meta_path(const std::string& state_path);
+std::string format_savestate_meta(std::uint64_t ppu_frame);
+bool parse_savestate_meta(const std::string& text, std::uint64_t* ppu_frame);
 
 // --- PNG ---------------------------------------------------------------------------------
 

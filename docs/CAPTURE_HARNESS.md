@@ -35,10 +35,51 @@ frame after, the requested number (with fast-forward up to `multiplier - 1` fram
 | `<P>_PUSH_KEYS="9000:Escape;9200:F2"` | Host key presses `<frame>:<SDL key name>` separated by `;`, pushed as SDL key events at that frame (not translated to GBA buttons). |
 | `<P>_SET="key=1;other=2"` | Settings overrides at start. The host reads them with `settings_overrides()` and applies them over its config file (and should not save the config in a harness run). |
 | `<P>_SAVESTATE_LOAD=<file>` | Load a savestate at start (`--load-state <file>` through `extra_runtime_args()`). |
-| `<P>_SAVESTATE_SAVE=<frame>:<slot>` | Save into `<slot>` (default 1) at that frame (`GBARECOMP_ASSIST_SCRIPT=<frame>:save<slot>`, the frame is at least 2). |
+| `<P>_SAVESTATE_SAVE=<pump>:<slot>` | Low level. Save into `<slot>` (default 1) at that **pump** of the runtime (`GBARECOMP_ASSIST_SCRIPT=<pump>:save<slot>`; the pump is at least 2). Pumps count from the start of the process, not PPU frames: prefer the next variable. |
+| `<P>_SAVESTATE_SAVE_PPU=<frame>:<slot>[,<frame>:<slot>...]` | Save one or more slots at **absolute PPU frames**, several per run (separators `,` `;` or spaces; slot defaults to 1, valid slots are 1..10). The harness translates the frames to pumps, see "Savestates by PPU frame". |
+| `<P>_SAVESTATE_LOAD_PPU_FRAME=<n>` | PPU frame of the state given in `<P>_SAVESTATE_LOAD` (needed by `_SAVE_PPU` when the state has no `.meta` sidecar). |
+| `<P>_SAVESTATE_ROM=<rom path>` | Where the runtime writes its slots (`<rom without extension>.state<N>`), so the sidecars can be written next to them. `CaptureConfig::rom_path` is the host-side equivalent; the runner scripts set this variable when `-P` / `-SavePpu` and a ROM are given. |
 | `<P>_FAST=1` | Fast-forward (`GBARECOMP_ASSIST_SCRIPT=1:fast_on`; paired with `fast_off` after a savestate save). |
 
 `SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy` (set by the runner scripts) make the run headless.
+
+## Savestates by PPU frame
+
+The runtime's own scripting (`GBARECOMP_ASSIST_SCRIPT`) counts pumps of the host loop from the start of the process. After a
+state saved at PPU frame F has been loaded, saving at PPU frame G therefore needs a pump number that depends on F and on a
+small start-up offset. `<P>_SAVESTATE_SAVE_PPU` does that translation (a pure function, `plan_savestate_pumps()`, covered by
+`tests/test_capture_harness.cpp`), so scenario scripts can speak in PPU frames only.
+
+```sh
+# From the ROM: slot 1 at frame 25000 and slot 2 at 26000 in one run.
+MYGAME_SAVESTATE_SAVE_PPU=25000:1,26000:2  MYGAME_SAVESTATE_ROM=roms/game.gba  ./mygame --rom roms/game.gba
+# Continue from the state in slot 1 and add more: the frame of the loaded state is read from its sidecar.
+cp roms/game.state1 s25000.st ; cp roms/game.state1.meta s25000.st.meta
+MYGAME_SAVESTATE_LOAD=s25000.st  MYGAME_SAVESTATE_SAVE_PPU=27500:3  ./mygame --rom roms/game.gba
+```
+
+Rules (measured on the runtime, one pump per emulated frame, with or without fast-forward):
+* From a fresh boot the state saved at pump P holds PPU frame P + 1, so frame G is pump G - 1 (earliest save: frame 3).
+* From a state loaded at frame L (the frame the runtime prints when it loads it), pump P holds frame L + P - 2, so frame G is
+  pump G - L + 2 (the earliest save is G = L, pump 2).
+* L is, in order: `<P>_SAVESTATE_LOAD_PPU_FRAME`; the `.meta` sidecar of the loaded file (`<state file>.meta`, one line
+  `ppu_frame=<n>`); 0 and a boot when no state is loaded. With a loaded state and neither source, the run reports
+  `ERROR ...` on stderr, `capture::configuration_error()` is set and **no save is scheduled** (a wrong guess would silently save a
+  different frame).
+* A frame that has already passed, two saves on the same frame (the runtime saves one slot per pump) and a slot used twice
+  are errors with a message that names the offender; the whole request is rejected.
+* The runtime writes slots as `<rom without extension>.state<N>`. When the ROM path is known (`<P>_SAVESTATE_ROM` or
+  `CaptureConfig::rom_path`) the harness writes `<that file>.meta` once the frame has been passed and the file exists, so a
+  copied state keeps its frame next to it (copy both files). Without the ROM path no sidecar is written (a note is printed) and
+  the frame has to be given with `<P>_SAVESTATE_LOAD_PPU_FRAME`.
+* The first emulated frame after a load is compared with the assumed frame; a difference of more than 5 prints a `WARNING`.
+* `<P>_SAVESTATE_SAVE` (pumps) keeps working and can be combined with `_SAVE_PPU`; the events are merged in pump order.
+* With `<P>_FAST=1` fast-forward is on from pump 1 and switched off one pump after the last save.
+* Pumps are emulated frames only when the host is not frame-skipping: use an uncapped run (`fps_target=0` for hosts that have it, or
+  `<P>_FAST=1`) to be safe.
+
+Library functions: `parse_savestate_requests`, `plan_savestate_pumps`, `build_assist_script`, `savestate_meta_path`,
+`format_savestate_meta`, `parse_savestate_meta`, `kSavestateLoadPumpBias`, `kSavestateBootPumpBias`.
 
 ## Input script
 
@@ -93,7 +134,7 @@ prefixes.
 
 | File | Generic? | Purpose |
 |---|---|---|
-| `run_capture.sh`, `run_capture.ps1` | yes (take the prefix, executable and ROM as arguments) | set the variables, run the host with the dummy drivers and a timeout, list the PNGs |
+| `run_capture.sh`, `run_capture.ps1` | yes (take the prefix, executable and ROM as arguments) | set the variables, run the host with the dummy drivers and a timeout, list the PNGs; `-P`/`-SavePpu` save slots at PPU frames and `-L`/`-LoadPpuFrame` give the frame of the loaded state |
 | `montage.py` | yes | contact sheet / crop-zoom of 8-bit RGB PNGs (Python standard library only) |
 | `stroke_runs.py` | yes | run-length histogram of dark strokes in a crop, to check integer scaling of text or line art |
 
