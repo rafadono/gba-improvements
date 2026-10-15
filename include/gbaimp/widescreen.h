@@ -52,6 +52,41 @@ using FnEntryHook = void (*)(uint32_t entry_pc);
 // Return value of a tilemap provider that keeps the hardware-wrapped entry on purpose.
 constexpr int kWsTilemapKeepWrapped = 2;
 
+// What a layer does in the margins, i.e. outside the central 240 pixels of the expanded view.
+//   Extend   the margin columns show the layer's own wrapped ring (the runtime's default picture).
+//   Blank    nothing of the layer is drawn in the margins (the provider answers "suppress").
+//   Runtime  decline: the runtime keeps its own behaviour for that layer. Today the answer is the
+//            same as Extend; it exists so a profile can say "do not care" without claiming that
+//            the wrapped ring was checked.
+// For OBJ (sprites) Blank clips every sprite pixel to the native 240 pixels (the runtime's
+// obj_native_clip); the other two leave sprites to the profile's obj_native_clip value.
+enum class WsMarginPolicy : uint8_t { Extend = 0, Blank = 1, Runtime = 2 };
+
+// One policy per BG layer 0..3 and one for OBJ. Plain value type: build it, return it.
+struct WsMarginPolicySet {
+    WsMarginPolicy bg[4] = {WsMarginPolicy::Extend, WsMarginPolicy::Extend,
+                            WsMarginPolicy::Extend, WsMarginPolicy::Extend};
+    WsMarginPolicy obj = WsMarginPolicy::Extend;
+
+    // Every layer (and OBJ) gets `p`.
+    static WsMarginPolicySet all(WsMarginPolicy p) {
+        WsMarginPolicySet s;
+        for (WsMarginPolicy& b : s.bg) b = p;
+        s.obj = p;
+        return s;
+    }
+    // Sets the BG layers in `layer_mask` (bit n = BG n) to `p`. Chainable.
+    WsMarginPolicySet& set_bg(unsigned layer_mask, WsMarginPolicy p) {
+        for (int i = 0; i < 4; ++i) {
+            if ((layer_mask >> i) & 1u) bg[i] = p;
+        }
+        return *this;
+    }
+    // Compact form used by the shared instance (2 bits per entry: BG0..BG3, then OBJ).
+    uint32_t pack() const;
+    static WsMarginPolicySet unpack(uint32_t packed);
+};
+
 // Pointers to the runtime's values. Every pointer may be null: a null input reads as 0, a null
 // output is simply not written (useful for a runtime that lacks that global).
 struct WidescreenBindings {
@@ -111,9 +146,19 @@ struct WidescreenProfile {
     int hud_default_offset = 32;
     HudAnchoring* hud = nullptr;   // nullptr = HudAnchoring::instance()
 
-    // Used by default_bg_x_provider(): BG layers (bit n = BG n) that never bleed into the margins
-    // (dialogue windows, UI layers). Layers not in the mask render across the full wide view.
+    // Used by default_bg_x_provider() when margin_policy is null: BG layers (bit n = BG n) that
+    // never bleed into the margins (dialogue windows, UI layers). Layers not in the mask render
+    // across the full wide view.
     unsigned centered_bg_layers = 0;
+
+    // Declarative margin policy per scene. Called with the current wide context whenever the
+    // module refreshes its policy (configure(), apply_policy(), after every poll_context): the answer is cached,
+    // so the per-pixel providers never call it. Return a WsMarginPolicySet for what the game is
+    // showing right now (read a mode flag from `user`, like poll_context does). While the view is
+    // not expanded nothing is installed and the callback is not used.
+    // Null = built-in rule: narrow context blanks every layer, wide context blanks exactly the
+    // layers in centered_bg_layers (and OBJ stays Extend).
+    WsMarginPolicySet (*margin_policy)(bool wide_context, void* user) = nullptr;
 };
 
 class Widescreen {
@@ -141,6 +186,10 @@ public:
     // --- wide context ---------------------------------------------------------------------
     // Polls the profile (if any), applies the policy on a change, returns the current context.
     bool wide_context();
+    // The margin policy in force (cached; see WidescreenProfile::margin_policy).
+    WsMarginPolicySet margin_policy() const;
+    // Policy of one BG layer (0..3) in the cache; Runtime for any other index.
+    WsMarginPolicy margin_policy_for_bg(int bg) const;
     // Last known context without polling.
     bool wide_context_cached() const { return context_.load(std::memory_order_relaxed); }
     // Sets the context and re-applies the policy.
@@ -183,7 +232,10 @@ private:
 
     WidescreenBindings bindings_;
     WidescreenProfile profile_;
+    void refresh_margin_policy();
+
     std::atomic<bool> context_{false};
+    std::atomic<uint32_t> margin_policy_{0};
     std::atomic<uint64_t> frame_counter_{0};
     std::atomic<uint64_t> last_wide_frame_{0};
     std::atomic<uint64_t> last_narrow_frame_{0};
@@ -212,9 +264,10 @@ int widescreen_obj_x(uint16_t attr1);
 // when the generic behaviour is what the game needs.
 //   default_tilemap_provider    keep the hardware-wrapped entry (kWsTilemapKeepWrapped) while the
 //                               presentation is active, decline otherwise.
-//   default_bg_x_provider       expanded view only. Narrow context: every margin column is
-//                               suppressed (-1). Wide context: margin columns are suppressed only for
-//                               the layers in profile.centered_bg_layers.
+//   default_bg_x_provider       expanded view only, margin columns only. Answers from the cached
+//                               margin policy of the layer: Blank = suppress (-1), Extend / Runtime =
+//                               unchanged (0). Without profile.margin_policy that is: narrow context
+//                               blanks every layer, wide context only profile.centered_bg_layers.
 //   default_obj_attr_x_provider expanded view only: sprites parked at raw X >= 256 get their signed X.
 int default_tilemap_provider(int bg, int hw_x, int screen_y, uint16_t* out_entry);
 int default_bg_x_provider(int bg, int output_x, int screen_y, int* out_hw_x);

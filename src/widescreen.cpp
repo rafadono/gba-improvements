@@ -4,6 +4,24 @@
 
 namespace gbaimp {
 
+uint32_t WsMarginPolicySet::pack() const {
+    uint32_t v = 0;
+    for (int i = 0; i < 4; ++i) v |= (static_cast<uint32_t>(bg[i]) & 3u) << (2 * i);
+    v |= (static_cast<uint32_t>(obj) & 3u) << 8;
+    return v;
+}
+
+WsMarginPolicySet WsMarginPolicySet::unpack(uint32_t v) {
+    auto at = [v](int shift) {
+        const uint32_t x = (v >> shift) & 3u;
+        return x > 2u ? WsMarginPolicy::Runtime : static_cast<WsMarginPolicy>(x);
+    };
+    WsMarginPolicySet s;
+    for (int i = 0; i < 4; ++i) s.bg[i] = at(2 * i);
+    s.obj = at(8);
+    return s;
+}
+
 Widescreen& Widescreen::instance() {
     static Widescreen s_instance;
     return s_instance;
@@ -17,6 +35,7 @@ void Widescreen::configure(const WidescreenBindings& bindings, const WidescreenP
     bindings_ = bindings;
     profile_ = profile;
     context_.store(profile.initial_wide_context, std::memory_order_relaxed);
+    refresh_margin_policy();
     frame_counter_.store(0, std::memory_order_relaxed);
     last_wide_frame_.store(0, std::memory_order_relaxed);
     last_narrow_frame_.store(0, std::memory_order_relaxed);
@@ -51,10 +70,34 @@ void Widescreen::effective_extra_pixels(int* left, int* right) const {
 
 // --- policy ---------------------------------------------------------------------------------
 
+void Widescreen::refresh_margin_policy() {
+    const bool wide = context_.load(std::memory_order_relaxed);
+    WsMarginPolicySet set;
+    if (profile_.margin_policy) {
+        set = profile_.margin_policy(wide, profile_.user);
+    } else if (!wide) {
+        set = WsMarginPolicySet::all(WsMarginPolicy::Blank);
+        set.obj = WsMarginPolicy::Extend;
+    } else {
+        set.set_bg(profile_.centered_bg_layers, WsMarginPolicy::Blank);
+    }
+    margin_policy_.store(set.pack(), std::memory_order_relaxed);
+}
+
+WsMarginPolicySet Widescreen::margin_policy() const {
+    return WsMarginPolicySet::unpack(margin_policy_.load(std::memory_order_relaxed));
+}
+
+WsMarginPolicy Widescreen::margin_policy_for_bg(int bg) const {
+    if (bg < 0 || bg > 3) return WsMarginPolicy::Runtime;
+    return static_cast<WsMarginPolicy>((margin_policy_.load(std::memory_order_relaxed) >> (2 * bg)) & 3u);
+}
+
 void Widescreen::apply_policy() {
     const bool expanded = view_active();
     const bool presenting_wide = expanded && context_.load(std::memory_order_relaxed);
     const WidescreenBindings& b = bindings_;
+    refresh_margin_policy();
 
     if (expanded) {
         if (b.tilemap_provider) *b.tilemap_provider = profile_.tilemap_provider;
@@ -62,7 +105,10 @@ void Widescreen::apply_policy() {
         if (b.bg_x_provider_layers) *b.bg_x_provider_layers = profile_.bg_x_provider_layers;
         if (b.obj_attr_x_provider) *b.obj_attr_x_provider = profile_.obj_attr_x_provider;
         if (b.authored_margin_layers) *b.authored_margin_layers = profile_.authored_margin_layers;
-        if (b.obj_native_clip) *b.obj_native_clip = profile_.obj_native_clip;
+        if (b.obj_native_clip) {
+            const bool blank_obj = margin_policy().obj == WsMarginPolicy::Blank;
+            *b.obj_native_clip = blank_obj ? 1 : profile_.obj_native_clip;
+        }
         if (b.pillarbox) {
             *b.pillarbox = (!presenting_wide && profile_.pillarbox_outside_context) ? 1 : 0;
         }
@@ -107,6 +153,8 @@ bool Widescreen::wide_context() {
             const bool wide = polled != 0;
             if (wide != context_.load(std::memory_order_relaxed)) set_wide_context(wide);
         }
+        // The callback may also depend on flags read during the poll (a scene inside a context).
+        refresh_margin_policy();
     }
     return context_.load(std::memory_order_relaxed);
 }
@@ -234,9 +282,7 @@ int default_bg_x_provider(int bg, int output_x, int, int* out_hw_x) {
 
     const bool in_margin = (output_x < left) || (output_x >= left + 240);
     if (!in_margin) return 0;
-    if (!ws.wide_context_cached()) return -1;
-    if (bg >= 0 && bg < 32 && ((ws.profile().centered_bg_layers >> bg) & 1u)) return -1;
-    return 0;
+    return ws.margin_policy_for_bg(bg) == WsMarginPolicy::Blank ? -1 : 0;
 }
 
 int default_obj_attr_x_provider(int, uint16_t, uint16_t attr1, uint16_t, int* out_x) {

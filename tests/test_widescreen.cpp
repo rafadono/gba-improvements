@@ -351,6 +351,126 @@ void test_independent_instance_and_options() {
     CHECK_EQ(empty.extra_left(), 0);
 }
 
+// ---- declarative margin policy per scene --------------------------------------------------------
+enum class Scene { Menu, Map, Battle, Cutscene };
+Scene g_scene = Scene::Menu;
+int g_policy_calls = 0;
+WsMarginPolicySet scene_policy(bool wide, void*) {
+    ++g_policy_calls;
+    if (!wide) return WsMarginPolicySet::all(WsMarginPolicy::Blank);               // menus: nothing in the margins
+    if (g_scene == Scene::Battle) {
+        WsMarginPolicySet s;                                                       // backdrop (BG2) extends
+        s.set_bg(0xB, WsMarginPolicy::Blank);                                      // BG0, BG1, BG3 stay inside
+        return s;
+    }
+    if (g_scene == Scene::Cutscene) {
+        WsMarginPolicySet s;
+        s.bg[1] = WsMarginPolicy::Runtime;
+        s.obj = WsMarginPolicy::Blank;                                             // sprites clipped to 240
+        return s;
+    }
+    return WsMarginPolicySet{};                                                    // map: everything extends
+}
+int scene_ctx(void*) { return g_scene == Scene::Menu ? 0 : 1; }
+
+// Answers of the installed background-X provider for one layer at a margin column and at the centre.
+int bgx(int bg, int x) {
+    int hw = 0;
+    return g_ws_bg_x_provider ? g_ws_bg_x_provider(bg, x, 40, &hw) : 99;
+}
+
+void test_margin_policy() {
+    Widescreen& ws = Widescreen::instance();
+    HudAnchoring::instance().set_mode(HudAnchorMode::OriginalCentered);
+    HudAnchoring::instance().set_horizontal_offset(32);
+    g_runtime_fn_entry_hook = nullptr;
+    WidescreenProfile p;
+    p.tilemap_provider = &default_tilemap_provider;
+    p.bg_x_provider = &default_bg_x_provider;
+    p.poll_context = &scene_ctx;
+    p.margin_policy = &scene_policy;
+    ws.configure(gbarecomp_widescreen_bindings(), p);
+    const Snapshot native = snap();
+
+    // Pure value type.
+    WsMarginPolicySet s;
+    s.set_bg(0x5, WsMarginPolicy::Blank).obj = WsMarginPolicy::Runtime;
+    const WsMarginPolicySet r = WsMarginPolicySet::unpack(s.pack());
+    CHECK(r.bg[0] == WsMarginPolicy::Blank && r.bg[1] == WsMarginPolicy::Extend);
+    CHECK(r.bg[2] == WsMarginPolicy::Blank && r.bg[3] == WsMarginPolicy::Extend);
+    CHECK(r.obj == WsMarginPolicy::Runtime);
+    CHECK(WsMarginPolicySet::all(WsMarginPolicy::Blank).pack() != WsMarginPolicySet{}.pack());
+
+    // Menu: nothing in the margins on any layer; the centre is never touched.
+    g_scene = Scene::Menu;
+    host_set_view(ws, true);
+    CHECK(!ws.wide_context_cached());
+    for (int bg = 0; bg < 4; ++bg) {
+        CHECK_EQ(bgx(bg, 3), -1);     // left margin (22 px)
+        CHECK_EQ(bgx(bg, 270), -1);   // right margin
+        CHECK_EQ(bgx(bg, 22), 0);     // first native column
+        CHECK_EQ(bgx(bg, 100), 0);
+        CHECK_EQ(bgx(bg, 261), 0);    // last native column
+    }
+    CHECK_EQ(g_ws_obj_native_clip, 1);     // all(Blank) includes OBJ
+
+    // Map: every layer extends with the wrapped ring.
+    g_scene = Scene::Map;
+    ws.update();
+    CHECK(ws.wide_context_cached());
+    for (int bg = 0; bg < 4; ++bg) { CHECK_EQ(bgx(bg, 3), 0); CHECK_EQ(bgx(bg, 270), 0); }
+
+    // Battle: BG0, BG1 and BG3 blank in the margins, BG2 extends, centre untouched.
+    g_scene = Scene::Battle;
+    ws.update();
+    CHECK_EQ(bgx(0, 3), -1); CHECK_EQ(bgx(1, 270), -1); CHECK_EQ(bgx(3, 3), -1);
+    CHECK_EQ(bgx(2, 3), 0);  CHECK_EQ(bgx(2, 270), 0);
+    for (int bg = 0; bg < 4; ++bg) CHECK_EQ(bgx(bg, 120), 0);
+    CHECK(ws.margin_policy().bg[2] == WsMarginPolicy::Extend);
+    CHECK(ws.margin_policy_for_bg(7) == WsMarginPolicy::Runtime);
+    int hw = 0;
+    CHECK_EQ(default_bg_x_provider(9, 3, 0, &hw), 0);        // not a real layer: left to the runtime
+
+    // OBJ Blank installs the native clip; Runtime never blanks.
+    g_scene = Scene::Cutscene;
+    ws.update();
+    CHECK_EQ(bgx(1, 3), 0);          // Runtime = decline
+    CHECK_EQ(bgx(0, 3), 0);
+    CHECK_EQ(g_ws_obj_native_clip, 1);
+    g_scene = Scene::Map;
+    ws.update();
+    CHECK_EQ(g_ws_obj_native_clip, 0);
+
+    // The answer is cached: per-pixel provider calls do not call the profile.
+    const int calls = g_policy_calls;
+    for (int i = 0; i < 1000; ++i) bgx(i & 3, i % 284);
+    CHECK_EQ(g_policy_calls, calls);
+
+    // Back to 3:2 in the middle of a battle: the exact native state (invariant).
+    g_scene = Scene::Cutscene;
+    ws.update();
+    CHECK_EQ(g_ws_obj_native_clip, 1);
+    host_set_view(ws, false);
+    CHECK(native == snap());
+    CHECK_EQ(g_ws_obj_native_clip, 0);
+    CHECK(HudAnchoring::instance().settings().mode == HudAnchorMode::OriginalCentered);
+    // and the provider is inert if somebody still calls it
+    CHECK_EQ(default_bg_x_provider(0, 3, 0, &hw), 0);
+
+    // Without margin_policy the old rule holds: narrow blanks all, wide blanks centered_bg_layers.
+    p.margin_policy = nullptr;
+    p.centered_bg_layers = 0x1u;
+    ws.configure(gbarecomp_widescreen_bindings(), p);
+    g_scene = Scene::Menu;
+    host_set_view(ws, true);
+    CHECK_EQ(bgx(2, 3), -1);
+    g_scene = Scene::Map;
+    ws.update();
+    CHECK_EQ(bgx(0, 3), -1); CHECK_EQ(bgx(1, 3), 0); CHECK_EQ(bgx(2, 270), 0);
+    host_set_view(ws, false);
+    CHECK(native == snap());
+}
+
 } // namespace
 
 int main() {
@@ -359,5 +479,6 @@ int main() {
     test_poll_and_frames();
     test_pure_viewport();
     test_independent_instance_and_options();
+    test_margin_policy();
     return testh::finish("widescreen");
 }

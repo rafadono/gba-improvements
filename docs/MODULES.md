@@ -187,12 +187,34 @@ The game-independent part of widescreen support. The runtime can render a view w
 
 **Viewport.** `compute_effective_viewport()` (and the free `widescreen_compute_viewport()`, which has the `GameHostConfig::compute_viewport` signature) polls the context and fills the source rectangle, destination rectangle and base size. Expanded texture (`tex_w * 2 > tex_h * 3`) with a wide context: the whole texture, scaled uniformly and centred. Expanded texture with a narrow context: the central 240x160 area only. Native texture: the whole texture as 240x160. `widescreen_viewport(wide, ...)` is the pure math.
 
-**Ready-made providers** (use `Widescreen::instance()` and the profile): `default_tilemap_provider` (keep the hardware-wrapped entry while the presentation is active), `default_bg_x_provider` (expanded view only: margin columns suppressed in a narrow context; in a wide context only for `profile.centered_bg_layers`), `default_obj_attr_x_provider` (sprites parked at raw X >= 256 get their signed X) and `widescreen_obj_x(attr1)`. A provider that tells HUD sprites from world sprites is game specific, so the host writes it (it can call `default_obj_attr_x_provider` for everything else).
+**Ready-made providers** (use `Widescreen::instance()` and the profile): `default_tilemap_provider` (keep the hardware-wrapped entry while the presentation is active), `default_bg_x_provider` (expanded view only; margin columns only; answers from the margin policy below), `default_obj_attr_x_provider` (sprites parked at raw X >= 256 get their signed X) and `widescreen_obj_x(attr1)`. A provider that tells HUD sprites from world sprites is game specific, so the host writes it (it can call `default_obj_attr_x_provider` for everything else).
+
+**Margin policy per scene.** The 22-ish extra columns on each side (outside the central 240) are not the same in every scene: a menu authored for 240 pixels must show nothing there, a scrolling map can continue its wrapped ring, a battle may extend only its backdrop. `profile.margin_policy` declares that per scene, with no custom provider:
+- `WsMarginPolicy`: `Extend` (the layer shows its wrapped ring, the runtime's picture), `Blank` (nothing of the layer in the margins; the provider answers "suppress") and `Runtime` (decline, the runtime decides; today the same answer as `Extend`).
+- `WsMarginPolicySet`: one policy for each of BG 0..3 plus `obj`. Helpers: `WsMarginPolicySet::all(p)` and the chainable `set_bg(layer_mask, p)`. For OBJ, `Blank` makes `apply_policy()` write `obj_native_clip = 1` (sprites clipped to the native 240 pixels); otherwise `profile.obj_native_clip` applies.
+- `WsMarginPolicySet (*margin_policy)(bool wide_context, void* user)`: return the set for what the game is showing now (read your mode flag from `user`, like `poll_context`). The module calls it from `apply_policy()` and after every `poll_context`, caches the answer in one atomic word, and `default_bg_x_provider` only reads that word: no call, allocation or `std::function` in the per-pixel path. `Widescreen::margin_policy()` / `margin_policy_for_bg(bg)` read the cache.
+- Not set: the previous rule (narrow context blanks every layer, wide context blanks `centered_bg_layers`), so existing profiles behave as before. While the view is not expanded nothing is installed, so the 3:2 invariant is unchanged.
+
+```cpp
+// A battle is a wide scene that keeps its UI layers (BG0, BG1) and a fill layer (BG3) out of the margins;
+// menus show nothing there; maps extend everything.
+static bool g_in_battle = false;                    // refreshed by poll_context from the game's RAM
+WsMarginPolicySet my_margins(bool wide, void*) {
+    WsMarginPolicySet s;                            // all Extend
+    if (!wide) {                                    // menu: nothing in the margins (sprites untouched)
+        s.set_bg(0xF, WsMarginPolicy::Blank);
+        return s;
+    }
+    if (g_in_battle) s.set_bg(0xB, WsMarginPolicy::Blank);   // bits 0, 1, 3
+    return s;
+}
+// profile.bg_x_provider = &default_bg_x_provider;  profile.margin_policy = &my_margins;
+```
 
 **Writing a profile for a new game.**
 1. `Widescreen::instance().configure(gbaimp::gbarecomp_widescreen_bindings(), profile)`.
 2. Decide the wide context: which game modes are authored for a wider picture. Either read the game's mode word (pull, `poll_context`; return -1 while it is not valid yet) or watch function entries (push, `on_fn_entry` and `set_wide_context`). This needs the game's ROM/IWRAM addresses, which stay in the host and have to be found per game.
-3. Pick the providers: start with `default_tilemap_provider` / `default_bg_x_provider` / `default_obj_attr_x_provider`, set `centered_bg_layers` to the dialogue/UI layers, and replace the sprite provider when the HUD has to move.
+3. Pick the providers: start with `default_tilemap_provider` / `default_bg_x_provider` / `default_obj_attr_x_provider`, set `margin_policy` (or the simpler `centered_bg_layers`) for the layers that must stay out of the margins, and replace the sprite provider when the HUD has to move.
 4. Register the HUD zones on `HudAnchoring` (`add_zone`, game geometry, host side). The offset is set by this module.
 5. Call `install()` from the extended-view init callback and `update()` from the per-frame callback and the SDL poll handler; call `notify_present()` from the present handler; assign `widescreen_compute_viewport` to `GameHostConfig::compute_viewport`.
 6. Replace the per-game helpers (view active, presentation active, effective extra pixels, frame counter) with the member functions above.
