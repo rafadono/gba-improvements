@@ -27,7 +27,7 @@ the same flags, plus `build.ps1`, `build.sh`, a Dockerfile and a CI workflow. Th
    `src/gbaimp_integration.cpp`, `src/sdl_intercepts.cpp` (the `GBAIMP_DEFINE_LD_WRAPS()` expansion and the Windows install call),
    `src/runtime_ui_standard.cpp`, `src/widescreen_adapter.cpp`, `src/ram_overlay_dispatch.cpp`, `src/scaffold_stub.cpp` (an empty stand-in
    used until `generated/` exists) and `tests/test_all_modules.cpp`. Edit the `SOURCES` / `TEST_SOURCES` lists to match; drop the ones you do not
-   need. On MSVC the template also expects `src/msvc_compat.h` (force-included); remove those lines if you do not have one.
+   need. On MSVC the template also expects `src/msvc_compat.h` (force-included), a single line `#include "gbaimp/msvc_compat.h"`; the template adds the library include directory so that line resolves in every translation unit, including the gbarecomp C sources. Generated files are written with LF line endings.
 4. **Add the recompiler inputs**: `config/mygame.toml`, `symbols/imported_symbols.tsv`, the ROM in `roms/` (never commit it) and, optionally,
    a BIOS image in `bios/`.
 5. **Recompile and build**: `./build.sh --recompile` (or `.\build.ps1 -Recompile`) generates `generated/`, then `./build.sh` / `.\build.ps1`
@@ -45,7 +45,7 @@ the same flags, plus `build.ps1`, `build.sh`, a Dockerfile and a CI workflow. Th
 | `@SYMBOL_PREFIX_UPPER@` | Uppercase prefix, derived (used for CMake variable names) | `MYGAME` |
 | `@TEST_TARGET@` | Native unit-test executable (default: `<prefix lowercase>_unit_tests`) | `mygame_unit_tests` |
 | `@ROM_FILE@` | Default ROM file name inside `roms/` (`build.ps1 -RomPath`); `build.sh` takes the first `roms/*.gba` | `My Game (USA).gba` |
-| `@RECOMP_CONFIG@` | gbarecomp config file name inside `config/` | `mygame.toml` |
+| `@RECOMP_CONFIG@` | gbarecomp config file name inside `config/`, with its extension (in Windows PowerShell 5.1 quote the whole `-D` argument: `"-DRECOMP_CONFIG=mygame.toml"`) | `mygame.toml` |
 
 `GAME_EXE`, `SYMBOL_PREFIX` and `PROJECT_NAME` must match `[A-Za-z][A-Za-z0-9_]*`.
 

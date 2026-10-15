@@ -7,7 +7,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# gba-improvements (git submodule; -DGBAIMP_ROOT=<path> overrides it). Defined first because the MSVC
+# force-include below needs its include directory.
+set(GBAIMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/gba-improvements"
+    CACHE PATH "gba-improvements library root (git submodule)")
+
 if(MSVC)
+    # src/msvc_compat.h is a single line, #include "gbaimp/msvc_compat.h". The force-include applies to
+    # every translation unit (including the C runtime sources), so the library headers must be reachable
+    # from all of them.
+    include_directories("${GBAIMP_ROOT}/include")
     file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/msvc_compat.h" MSVC_COMPAT_HEADER)
     add_compile_options("/FI${MSVC_COMPAT_HEADER}")
 endif()
@@ -39,9 +48,6 @@ set(GBARECOMP_GENERATED_BIOS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/generated_bios"
     CACHE PATH "Directory containing locally generated BIOS recompilation sources" FORCE)
 add_subdirectory("${GBARECOMP_ROOT}" gbarecomp_build EXCLUDE_FROM_ALL)
 
-# gba-improvements (git submodule; -DGBAIMP_ROOT=<path> overrides it).
-set(GBAIMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/gba-improvements"
-    CACHE PATH "gba-improvements library root (git submodule)")
 if(NOT EXISTS "${GBAIMP_ROOT}/CMakeLists.txt")
     message(FATAL_ERROR "GBAIMP_ROOT does not point to a gba-improvements checkout: ${GBAIMP_ROOT}")
 endif()

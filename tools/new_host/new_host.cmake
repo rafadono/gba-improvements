@@ -16,7 +16,9 @@
 #   SYMBOL_PREFIX_UPPER SYMBOL_PREFIX in uppercase (CMake variable names)
 #   TEST_TARGET         native unit-test executable
 #   ROM_FILE            default ROM file name inside roms/ (build.ps1 -RomPath default)
-#   RECOMP_CONFIG       gbarecomp config file name inside config/ (for example mygame.toml)
+#   RECOMP_CONFIG       gbarecomp config file name inside config/, WITH its extension (for example mygame.toml).
+#                       In Windows PowerShell 5.1 quote the whole argument, "-DRECOMP_CONFIG=mygame.toml": unquoted,
+#                       the argument is split at the dot and the name loses its extension.
 #
 # The script fails if any @PLACEHOLDER@ is left unresolved in an output file.
 
@@ -79,6 +81,11 @@ foreach(_entry IN LISTS _map)
 endforeach()
 
 foreach(_out IN LISTS _outputs)
-    file(WRITE "${OUT_DIR}/${_out}" "${_rendered_${_out}}")
+    # LF everywhere: the generated scripts run on Linux and the repositories keep LF in the index, even when
+    # the template files were checked out with CRLF on Windows.
+    string(REPLACE "
+" "
+" _lf_text "${_rendered_${_out}}")
+    file(WRITE "${OUT_DIR}/${_out}" "${_lf_text}")
     message(STATUS "new_host: wrote ${OUT_DIR}/${_out}")
 endforeach()
