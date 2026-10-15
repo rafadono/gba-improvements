@@ -3,16 +3,19 @@
 This file records third-party material, algorithm references and open provenance questions for
 `gba-improvements`. The project is released under the MIT License (see `LICENSE`).
 
-## Open item: 5x7 bitmap font (`src/perf_hud.cpp`, `kFont5x7`)
+## Open item: 5x7 bitmap font (`src/font5x7.h`, `kFont5x7`)
 
-The performance overlay draws text with a hand-entered 5x7 ASCII bitmap font (the table
-`kFont5x7`, glyphs for ASCII 32..126, five column bytes per glyph). A review found that its data
+The performance overlay (`src/perf_hud.cpp`) and the text history sidebar (`src/text_history.cpp`)
+draw text with a hand-entered 5x7 ASCII bitmap font (the table `kFont5x7`, glyphs for ASCII
+32..126, five column bytes per glyph, kept once in the internal header `src/font5x7.h`). The same
+table, byte for byte, was carried by a host project's own dialogue overlay before that code moved
+here, so no independent origin is known for either copy. A review found that its data
 matches a widely copied public 5x7 font whose exact origin could not be established. Because the
 original author and terms cannot be proven, the font is treated as **of uncertain provenance**.
 
 Recommendation: before any formal release, replace `kFont5x7` with an
 original font drawn for this project, or with a font that is explicitly CC0 / public domain with a
-documented source, and then remove this item. The table is private to `perf_hud.cpp` and only
+documented source, and then remove this item. The table is private to the library (internal header, not installed) and only
 indexed by character code, so replacing it does not change any public API.
 
 ## Algorithm references

@@ -54,5 +54,5 @@ Game-specific logic: which memory holds the dialogue, ROM addresses, mode detect
 
 ## Open items
 - [x] License: MIT (see `LICENSE`).
-- [ ] Replace the 5x7 bitmap font in `perf_hud.cpp` with an original or CC0 one (see `NOTICE.md`).
+- [ ] Replace the 5x7 bitmap font (`src/font5x7.h`, shared by `perf_hud.cpp` and `text_history.cpp`) with an original or CC0 one (see `NOTICE.md`).
 - [ ] Run the CI workflow on GitHub and fix whatever it finds (it has only been authored so far).

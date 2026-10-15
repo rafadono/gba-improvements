@@ -33,6 +33,7 @@ add_library(gba_improvements STATIC
     src/dialog_turbo.cpp
     src/savestate_thumbnails.cpp
     src/perf_hud.cpp
+    src/text_history.cpp
     src/input_enhancements.cpp
     src/hud_anchoring.cpp
     src/game_host.cpp
@@ -109,7 +110,7 @@ if(GBAIMP_BUILD_TESTS)
         pixel_art_upscaler screen_filters audio_dsp hd_audio_player dialog_turbo
         hud_anchoring input_enhancements savestate_thumbnails hooks
         perf_hud frame_interpolator instances audio_pipeline sdl_interpose
-        audio_device audio_threads game_host widescreen capture_harness host_settings ram_dispatch host_boot m4a_music_hook
+        audio_device audio_threads game_host widescreen capture_harness host_settings ram_dispatch host_boot m4a_music_hook text_history
         text_fonts text_layout text_renderer text_fade)
     foreach(_t IN LISTS _gbaimp_tests)
         add_executable(${_gbaimp_test_prefix}test_${_t} tests/test_${_t}.cpp)

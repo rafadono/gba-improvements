@@ -22,11 +22,16 @@
 //     hook.locate(rom_ptr, rom_size);        // or hook.set_addresses(...)
 //     hook.set_bus_reader(&my_bus_read_u32); // reads guest memory (for the song table)
 //     hook.load_track_mapping("config/music_tracks.ini");
+// or, in one call, locator + optional per-game fallback table + bus reader:
+//     gbaimp::M4aSetupOptions o;  o.log_tag = "mygame";  o.env_prefix = "MYGAME_";
+//     o.fallback = &my_known_addresses;  o.bus_read_u32 = &my_bus_read_u32;
+//     auto how = hook.setup_from_rom(rom_ptr, rom_size, o);   // Locator / Fallback / None
 // and from the function-entry hook:  hook.on_function_entry(pc, cpu.R[0]);
 // The library needs no gbarecomp header.
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <utility>
 #include <string>
@@ -87,6 +92,23 @@ public:
     virtual void load_track_mapping(const std::string& ini_path) = 0;
 };
 
+// How the function addresses of a hook were obtained (M4aMusicHook::setup_source()).
+enum class M4aSetupSource {
+    None,       // no addresses yet, or the locator failed and there was no fallback table
+    Locator,    // found in the ROM by locate_m4a()
+    Fallback,   // locator failed, the host's fallback table was used
+    Manual      // set_addresses() was called directly
+};
+
+// Inputs of M4aMusicHook::setup_from_rom(). Every member is optional.
+struct M4aSetupOptions {
+    const char* log_tag = nullptr;            // set_log_tag (nullptr keeps the current tag)
+    const char* env_prefix = nullptr;         // set_logging_from_env("<prefix>"); nullptr leaves logging alone
+    const M4aAddresses* fallback = nullptr;   // used when the locator does not find all five functions
+    uint32_t (*bus_read_u32)(uint32_t) = nullptr;   // set_bus_reader (song table lookups through guest memory)
+    uint32_t rom_base = 0x08000000u;
+};
+
 struct M4aHookStats {
     uint64_t starts = 0;            // m4aSongNum*Start* calls seen
     uint64_t mapped_triggers = 0;   // of those, ids that have a mapping (trigger_song was called)
@@ -108,6 +130,13 @@ public:
     bool locate(const uint8_t* rom, size_t size, uint32_t rom_base = 0x08000000u);   // true when complete
     void set_addresses(const M4aAddresses& a);
     const M4aAddresses& addresses() const { return addr_; }
+
+    // One-call start-up: log tag / environment logging, locate() in the ROM image, `fallback` when
+    // the locator fails, and the bus reader. Does nothing (returns None, state untouched) when
+    // `rom` is null or `size` is 0, so a host can call it again once the ROM is mapped. Returns how
+    // the addresses were obtained; the same value stays available from setup_source().
+    M4aSetupSource setup_from_rom(const uint8_t* rom, size_t size, const M4aSetupOptions& opts = {});
+    M4aSetupSource setup_source() const { return source_; }
 
     // Where the player index of a song is read from (gSongTable[id].player). In order of use:
     //   1. set_song_player_reader (test seam / custom lookup, receives the song id)
@@ -138,6 +167,8 @@ public:
     void on_all_stop();
 
     M4aHookStats stats() const;
+    // Writes "[tag] m4a song hook: starts=N hd_mapped=N hd_stops=N" (+ newline) to `out` (stderr when null).
+    void print_stats(const char* tag, std::FILE* out = nullptr) const;
     void reset_stats_and_state();
 
 private:
@@ -147,6 +178,7 @@ private:
     HdMusicSink& sink() const;
 
     M4aAddresses addr_;
+    M4aSetupSource source_ = M4aSetupSource::None;
     uint32_t lo_ = 0, hi_ = 0;   // address window for the fast reject
     HdMusicSink* sink_ = nullptr;
     struct DefaultSink;

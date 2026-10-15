@@ -261,6 +261,7 @@ void M4aMusicHook::set_sink(HdMusicSink* s) { sink_ = s; }
 
 void M4aMusicHook::set_addresses(const M4aAddresses& a) {
     addr_ = a;
+    source_ = M4aSetupSource::Manual;
     const uint32_t f[5] = {a.song_num_start, a.song_num_start_or_change, a.song_num_start_or_continue,
                            a.song_num_stop, a.mplay_all_stop};
     lo_ = 0xFFFFFFFFu;
@@ -276,7 +277,21 @@ void M4aMusicHook::set_addresses(const M4aAddresses& a) {
 bool M4aMusicHook::locate(const uint8_t* rom, size_t size, uint32_t rom_base) {
     const M4aAddresses a = locate_m4a(rom, size, rom_base);
     set_addresses(a);
+    source_ = a.complete() ? M4aSetupSource::Locator : M4aSetupSource::None;
     return a.complete();
+}
+
+M4aSetupSource M4aMusicHook::setup_from_rom(const uint8_t* rom, size_t size, const M4aSetupOptions& o) {
+    if (!rom || size == 0) return M4aSetupSource::None;
+    if (o.log_tag) set_log_tag(o.log_tag);
+    if (o.env_prefix) set_logging_from_env(o.env_prefix);
+    if (!locate(rom, size, o.rom_base) && o.fallback) {
+        set_addresses(*o.fallback);
+        source_ = M4aSetupSource::Fallback;
+    }
+    if (o.bus_read_u32) set_bus_reader(o.bus_read_u32);
+    else set_rom_image(rom, size, o.rom_base);   // no bus: read the song table from the image
+    return source_;
 }
 
 void M4aMusicHook::set_song_player_reader(std::function<uint32_t(uint32_t)> r) { reader_ = std::move(r); }
@@ -374,6 +389,13 @@ M4aHookStats M4aMusicHook::stats() const {
     s.mapped_triggers = mapped_.load(std::memory_order_relaxed);
     s.hd_stops = stops_.load(std::memory_order_relaxed);
     return s;
+}
+
+void M4aMusicHook::print_stats(const char* tag, std::FILE* out) const {
+    const M4aHookStats m = stats();
+    std::fprintf(out ? out : stderr, "[%s] m4a song hook: starts=%llu hd_mapped=%llu hd_stops=%llu\n",
+                 (tag && *tag) ? tag : tag_.c_str(), static_cast<unsigned long long>(m.starts),
+                 static_cast<unsigned long long>(m.mapped_triggers), static_cast<unsigned long long>(m.hd_stops));
 }
 
 void M4aMusicHook::reset_stats_and_state() {

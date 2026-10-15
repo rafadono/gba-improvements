@@ -308,5 +308,74 @@ int main() {
         CHECK_EQ(h.stats().hd_stops, uint64_t(0));
     }
 
+    // --- setup_from_rom: locator, fallback table, indicator, stats line --------------------------------
+    {
+        M4aMusicHook h;
+        CHECK(h.setup_source() == M4aSetupSource::None);
+        CHECK(h.setup_from_rom(nullptr, 0) == M4aSetupSource::None);       // ROM not mapped yet: no-op
+
+        M4aSetupOptions o;
+        o.log_tag = "t";
+        o.bus_read_u32 = &fake_bus;
+        CHECK(h.setup_from_rom(rom.d.data(), rom.d.size(), o) == M4aSetupSource::Locator);
+        CHECK(h.setup_source() == M4aSetupSource::Locator);
+        CHECK_EQ(h.addresses().song_num_start, a.song_num_start);
+
+        // ROM without the engine: no fallback -> None, with fallback -> Fallback and the table is kept
+        Rom blank(0x10000);
+        M4aMusicHook h2;
+        CHECK(h2.setup_from_rom(blank.d.data(), blank.d.size(), o) == M4aSetupSource::None);
+        CHECK(!h2.addresses().complete());
+        M4aAddresses fb;
+        fb.song_num_start = 0x08001000u; fb.song_num_start_or_change = 0x08001100u;
+        fb.song_num_start_or_continue = 0x08001200u; fb.song_num_stop = 0x08001300u;
+        fb.mplay_all_stop = 0x08001400u; fb.song_table = kSongTable; fb.song_table_entries = 5;
+        o.fallback = &fb;
+        CHECK(h2.setup_from_rom(blank.d.data(), blank.d.size(), o) == M4aSetupSource::Fallback);
+        CHECK(h2.setup_source() == M4aSetupSource::Fallback);
+        CHECK_EQ(h2.addresses().song_num_stop, 0x08001300u);
+        // the bus reader was installed: a start of song 1 on the fallback table sees player 2
+        FakeSink fs; fs.tracks[1] = true;
+        h2.set_sink(&fs);
+        h2.on_function_entry(0x08001000u, 1);
+        CHECK_EQ(fs.cur, 1u);
+        h2.on_function_entry(0x08001000u, 2);        // unmapped, player 7 != 2: left alone
+        CHECK_EQ(fs.cur, 1u);
+        h2.on_function_entry(0x08001000u, 3);        // unmapped, player 2 == HD player: HD stops
+        CHECK_EQ(fs.cur, 0u);
+
+        // a successful locator wins over the fallback
+        M4aMusicHook h3;
+        CHECK(h3.setup_from_rom(rom.d.data(), rom.d.size(), o) == M4aSetupSource::Locator);
+        CHECK_EQ(h3.addresses().song_num_stop, a.song_num_stop);
+
+        // without a bus reader the ROM image is used for the song table
+        M4aMusicHook h4;
+        M4aSetupOptions o4;
+        CHECK(h4.setup_from_rom(rom.d.data(), rom.d.size(), o4) == M4aSetupSource::Locator);
+        FakeSink s4; s4.tracks[1] = true;
+        h4.set_sink(&s4);
+        h4.on_function_entry(a.song_num_start, 1);
+        CHECK_EQ(s4.cur, 1u);
+
+        // direct set_addresses is reported as Manual
+        M4aMusicHook h5;
+        h5.set_addresses(fb);
+        CHECK(h5.setup_source() == M4aSetupSource::Manual);
+
+        // stats line
+        testh::TempDir tmp("m4a_stats");
+        const std::string p = tmp.file("stats.txt");
+        std::FILE* f = std::fopen(p.c_str(), "wb");
+        CHECK(f != nullptr);
+        if (f) {
+            h2.print_stats("tag", f);
+            std::fclose(f);
+            std::ifstream in(p, std::ios::binary);
+            const std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            CHECK_EQ(txt, std::string("[tag] m4a song hook: starts=3 hd_mapped=1 hd_stops=1\n"));
+        }
+    }
+
     return testh::finish("m4a_music_hook");
 }
