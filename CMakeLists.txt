@@ -151,6 +151,9 @@ if(GBAIMP_BUILD_TESTS)
         # tools/merge_cache_misses.py, update_symbols.py, import_decomp_symbols.py, png_to_ppm.py, gen_font_data.py
         add_test(NAME ${_gbaimp_test_prefix}tools_py
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tools.py)
+        # tools/ram_snapshot.py and tools/ram_diff.py against a fake observe-mode TCP server
+        add_test(NAME ${_gbaimp_test_prefix}ram_tools_py
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ram_tools.py)
         set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/gen_ram_dispatch_fixture")
         file(GLOB _gen_fixture_inputs "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ram_dispatch/cache/*/*.c")
         add_custom_command(
