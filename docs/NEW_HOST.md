@@ -70,7 +70,7 @@ It reads `GBARECOMP_ROOT` (required), `SDL2_INCLUDE_DIR`, `RECOMP_UI_DIR` and `G
   sources with warnings off (`/w` or `-w`).
 - Include directories (`src`, `generated`, gbarecomp `src`, `src/runtime`, `src/gba`, plus `src/armv4t` for the executable only, SDL2) and a link to
   `gbaimp::gba_improvements`.
-- With recomp-ui: `recomp_target_launcher_ui()` and replacement of the stock `runtime_ui_imgui.cpp` by `src/runtime_ui_imgui_enhanced.cpp`.
+- With recomp-ui: `recomp_target_launcher_ui()` and replacement of the stock `runtime_ui_imgui.cpp` by the library's `optional/recomp_ui/runtime_ui_imgui_enhanced.cpp` (override with `ENHANCED_IMGUI_SOURCE <file>`; a host no longer carries its own copy). That file needs `recomp_runtime_ui_internal.h` and `launcher_theme.h` from recomp-ui plus `imgui.h` (Dear ImGui 1.89.7 or newer), which `recomp_target_launcher_ui()` puts on the include path; it is never compiled without recomp-ui.
 - Links the gbarecomp runtime stack with `target_link_gbarecomp_runtime_stack()` when available, otherwise the four gbarecomp static libraries
   (inside `--start-group` for the executable on GNU ld); `pthread dl m` on Linux.
 - GNU ld: `-Wl,--wrap=` for `SDL_PollEvent`, `SDL_RenderPresent`, `SDL_UpdateTexture`, `SDL_RenderCopy`, `SDL_QueueAudio`, `SDL_OpenAudioDevice`

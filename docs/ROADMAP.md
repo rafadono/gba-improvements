@@ -26,6 +26,7 @@
 
 ## Ideas for the existing modules
 - [x] Shared build kit for hosts (`cmake/GbaimpHost.cmake`, `templates/host/`, `tools/new_host/`, `docs/NEW_HOST.md`).
+- [x] Shared enhanced recomp-ui menu renderer (`optional/recomp_ui/`), compiled by `gbaimp_add_host()`.
 - [ ] `hd_audio_player`: formats beyond WAV, per-track loop points, streaming instead of whole-file decode.
 - [ ] `savestate_thumbnails`: selectable image format.
 - [ ] `input_enhancements`: more `PadButtonChoice` entries (stick clicks, back/guide), persistence of analog settings in the ini.

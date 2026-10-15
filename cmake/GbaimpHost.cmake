@@ -28,6 +28,11 @@
 #   GENERATED_DIR <dir>    Default: ${CMAKE_CURRENT_SOURCE_DIR}/generated
 #   SCAFFOLD_STUB <file>   Default: src/scaffold_stub.cpp (used while nothing is generated yet)
 #   INCLUDE_DIRS <dirs...> Extra private include directories for both targets.
+#   ENHANCED_IMGUI_SOURCE <file>
+#                          Default: <gba-improvements>/optional/recomp_ui/runtime_ui_imgui_enhanced.cpp.
+#                          The in-game menu renderer compiled in place of recomp-ui's stock
+#                          runtime_ui_imgui.cpp (only when recomp-ui is present). Pass a host file to
+#                          use a customised renderer instead of the shared one.
 #   SDL2_DLL <file>        Default: ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl2/lib/x64/SDL2.dll.
 #                          Copied next to the exe and to the source root when it exists.
 #
@@ -52,6 +57,13 @@
 
 include_guard(GLOBAL)
 
+# Root of the gba-improvements checkout this file belongs to (resolved here because
+# CMAKE_CURRENT_LIST_DIR inside a function would be the caller's directory).
+get_filename_component(_GBAIMP_KIT_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+set(GBAIMP_ENHANCED_IMGUI_SOURCE_DEFAULT
+    "${_GBAIMP_KIT_ROOT}/optional/recomp_ui/runtime_ui_imgui_enhanced.cpp"
+    CACHE INTERNAL "Shared enhanced recomp-ui menu renderer")
+
 # Runtime-stack and platform settings shared by the executable and the test target.
 function(_gbaimp_host_configure_target tgt is_test prefix_lower)
     set(_inc src "${_GBAIMP_HOST_GENERATED_DIR}"
@@ -65,13 +77,17 @@ function(_gbaimp_host_configure_target tgt is_test prefix_lower)
     target_include_directories(${tgt} PRIVATE ${_inc} ${_GBAIMP_HOST_INCLUDE_DIRS})
     target_link_libraries(${tgt} PRIVATE gbaimp::gba_improvements)
 
-    # recomp-ui launcher: swap the stock imgui front end for the host's enhanced one.
+    # recomp-ui launcher: swap the stock imgui front end for the enhanced one.
+    # (The source lives in the library: optional/recomp_ui/, not in the host.)
     if(COMMAND recomp_target_launcher_ui)
         recomp_target_launcher_ui(${tgt} CONSOLE gba)
         get_target_property(_srcs ${tgt} SOURCES)
         list(FILTER _srcs EXCLUDE REGEX "runtime_ui_imgui\\.cpp$")
         set_target_properties(${tgt} PROPERTIES SOURCES "${_srcs}")
-        target_sources(${tgt} PRIVATE src/runtime_ui_imgui_enhanced.cpp)
+        if(NOT EXISTS "${_GBAIMP_HOST_ENHANCED_IMGUI}")
+            message(FATAL_ERROR "gbaimp_add_host: enhanced imgui source not found: ${_GBAIMP_HOST_ENHANCED_IMGUI}")
+        endif()
+        target_sources(${tgt} PRIVATE "${_GBAIMP_HOST_ENHANCED_IMGUI}")
     endif()
 
     if(COMMAND target_link_gbarecomp_runtime_stack)
@@ -115,7 +131,7 @@ endfunction()
 function(gbaimp_add_host exe)
     cmake_parse_arguments(PARSE_ARGV 1 H
         ""
-        "SYMBOL_PREFIX;TEST_TARGET;GENERATED_DIR;SCAFFOLD_STUB;SDL2_DLL"
+        "SYMBOL_PREFIX;TEST_TARGET;GENERATED_DIR;SCAFFOLD_STUB;SDL2_DLL;ENHANCED_IMGUI_SOURCE"
         "SOURCES;TEST_SOURCES;INCLUDE_DIRS")
     if(H_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "gbaimp_add_host: unknown arguments: ${H_UNPARSED_ARGUMENTS}")
@@ -149,6 +165,11 @@ function(gbaimp_add_host exe)
     # Passed to the helper (functions share no state otherwise).
     set(_GBAIMP_HOST_GENERATED_DIR "${H_GENERATED_DIR}")
     set(_GBAIMP_HOST_INCLUDE_DIRS "${H_INCLUDE_DIRS}")
+    if(H_ENHANCED_IMGUI_SOURCE)
+        set(_GBAIMP_HOST_ENHANCED_IMGUI "${H_ENHANCED_IMGUI_SOURCE}")
+    else()
+        set(_GBAIMP_HOST_ENHANCED_IMGUI "${GBAIMP_ENHANCED_IMGUI_SOURCE_DEFAULT}")
+    endif()
     set(_GBAIMP_HOST_RUI_SETTINGS_C "")
     if(RECOMP_UI_DIR AND EXISTS "${RECOMP_UI_DIR}/src/common/recomp_runtime_settings.c")
         set(_GBAIMP_HOST_RUI_SETTINGS_C "${RECOMP_UI_DIR}/src/common/recomp_runtime_settings.c")

@@ -147,6 +147,9 @@ if(GBAIMP_BUILD_TESTS)
     if(Python3_Interpreter_FOUND)
         add_test(NAME ${_gbaimp_test_prefix}gen_ram_dispatch_py
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gen_ram_dispatch.py)
+        # tools/merge_cache_misses.py, update_symbols.py, import_decomp_symbols.py, png_to_ppm.py, gen_font_data.py
+        add_test(NAME ${_gbaimp_test_prefix}tools_py
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tools.py)
         set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/gen_ram_dispatch_fixture")
         file(GLOB _gen_fixture_inputs "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/ram_dispatch/cache/*/*.c")
         add_custom_command(
