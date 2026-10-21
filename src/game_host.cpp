@@ -1,4 +1,5 @@
 #include "gbaimp/game_host.h"
+#include "gbaimp/margin_fill.h"
 
 #include "gbaimp/audio_device.h"
 #include "gbaimp/audio_pipeline.h"
@@ -92,7 +93,7 @@ int update_texture_handler(SDL_Texture* texture, const SDL_Rect* rect, const voi
     if (SDL_QueryTexture(texture, &format, &access, &tex_w, &tex_h) == 0 &&
         format == SDL_PIXELFORMAT_RGB24 && pitch >= tex_w * 3) {
         const GameHostConfig& c = cfg();
-        if (tex_h == 160 && (tex_w == 240 || tex_w == 284) && c.on_native_frame &&
+        if (is_gba_game_texture(format, access, tex_w, tex_h) && c.on_native_frame &&
             (!c.wants_native_frame || c.wants_native_frame())) {
             c.on_native_frame(pixels, pitch, tex_w, tex_h);   // raw PPU framebuffer
         }
@@ -147,12 +148,9 @@ int render_copy_handler(SDL_Renderer* renderer, SDL_Texture* texture, const SDL_
                                                                        &src, &dst, &base_w, &base_h);
     PerfHud::instance().set_game_viewport(dst);
 
-    // Clear letterbox / pillarbox areas outside the game viewport to pure black.
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    if (dst.x > 0) { SDL_Rect bar = {0, 0, dst.x, out_h}; SDL_RenderFillRect(renderer, &bar); }
-    if (dst.x + dst.w < out_w) { SDL_Rect bar = {dst.x + dst.w, 0, out_w - (dst.x + dst.w), out_h}; SDL_RenderFillRect(renderer, &bar); }
-    if (dst.y > 0) { SDL_Rect bar = {0, 0, out_w, dst.y}; SDL_RenderFillRect(renderer, &bar); }
-    if (dst.y + dst.h < out_h) { SDL_Rect bar = {0, dst.y + dst.h, out_w, out_h - (dst.y + dst.h)}; SDL_RenderFillRect(renderer, &bar); }
+    // Letterbox / pillarbox areas outside the game viewport: black, or the configured backdrop
+    // (edge repeat / blur of the picture, see margin_fill.h).
+    MarginFill::instance().draw(renderer, texture, src, dst, out_w, out_h);
 
     const int res = sdl_real().render_copy(renderer, texture, &src, &dst);
 
@@ -202,25 +200,39 @@ SDL_AudioDeviceID open_audio_device_handler(const char* device, int iscapture, c
 
 } // namespace
 
+namespace {
+// A logical game view: 240..2048 wide, 160..2048 tall, at most 4:1 (32:9 is 3.6:1).
+bool is_game_view_size(int w, int h) {
+    return w >= 240 && h >= 160 && w <= 2048 && h <= 2048 && w <= h * 4;
+}
+// Integer prescale factor of a texture that is `factor` times a logical view, or 0.
+int prescale_factor(int tex_w, int tex_h) {
+    if (tex_h % 160 == 0) {
+        const int k = tex_h / 160;
+        if (tex_w % k == 0 && is_game_view_size(tex_w / k, 160)) return k;
+    }
+    for (int k = 1; k <= 16; ++k) {
+        if (tex_w % k == 0 && tex_h % k == 0 && is_game_view_size(tex_w / k, tex_h / k)) return k;
+    }
+    return 0;
+}
+} // namespace
+
 bool is_gba_game_texture(uint32_t format, int access, int tex_w, int tex_h) {
     if (tex_w <= 0 || tex_h <= 0) return false;
     const bool streaming_gba = (access == SDL_TEXTUREACCESS_STREAMING &&
-                                format == SDL_PIXELFORMAT_RGB24 &&
-                                tex_h == 160 && (tex_w == 240 || tex_w == 284));
+                                format == SDL_PIXELFORMAT_RGB24 && is_game_view_size(tex_w, tex_h));
     const bool scaled_target = (access == SDL_TEXTUREACCESS_TARGET &&
-                                format == SDL_PIXELFORMAT_RGBA8888 &&
-                                tex_h % 160 == 0 &&
-                                ((tex_w % 284 == 0 && tex_w / 284 == tex_h / 160) ||
-                                 (tex_w % 240 == 0 && tex_w / 240 == tex_h / 160)));
+                                format == SDL_PIXELFORMAT_RGBA8888 && prescale_factor(tex_w, tex_h) > 0);
     return streaming_gba || scaled_target;
 }
 
 void default_game_viewport(int tex_w, int tex_h, int win_w, int win_h,
                            SDL_Rect* out_src, SDL_Rect* out_dst, int* out_base_w, int* out_base_h) {
     if (!out_src || !out_dst || tex_w <= 0 || tex_h <= 0 || win_w <= 0 || win_h <= 0) return;
-    const int factor = (tex_h / 160 > 0) ? (tex_h / 160) : 1;
+    const int factor = std::max(1, prescale_factor(tex_w, tex_h));
     const int base_w = std::max(1, tex_w / factor);
-    const int base_h = 160;
+    const int base_h = std::max(1, tex_h / factor);
     out_src->x = 0;
     out_src->y = 0;
     out_src->w = tex_w;

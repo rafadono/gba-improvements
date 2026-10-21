@@ -39,11 +39,18 @@ int main() {
     // --- pure helpers ---------------------------------------------------------------
     CHECK(is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 240, 160));
     CHECK(is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 284, 160));
-    CHECK(!is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 256, 160));
+    CHECK(is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 256, 160));    // 16:10
+    CHECK(is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 427, 160));    // 16:9 wide
+    CHECK(is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 569, 160));    // 32:9
+    CHECK(is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 240, 180));    // taller view
+    CHECK(!is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 239, 160));   // below native
+    CHECK(!is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 1000, 160));  // wider than 4:1
+    CHECK(!is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 4096, 2048)); // too big
     CHECK(!is_gba_game_texture(SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, 240, 160));
     CHECK(is_gba_game_texture(SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 720, 480));   // 240*3 x 160*3
     CHECK(is_gba_game_texture(SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 852, 480));   // 284*3 x 160*3
-    CHECK(!is_gba_game_texture(SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 720, 320));  // ratio mismatch
+    CHECK(!is_gba_game_texture(SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 720, 100));   // below native height
+    CHECK(is_gba_game_texture(SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 1119, 480));   // 373 x 3
     CHECK(!is_gba_game_texture(SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 0, 0));
 
     {   // 3:2 texture into a 1920x1080 window: height-limited, centred, full texture as source.

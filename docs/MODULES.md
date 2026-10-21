@@ -161,7 +161,23 @@ One handler / real-function design for every platform, used to observe or alter 
 - Thread safety: install / set / uninstall are serialized by an internal mutex; intended use is once, early in `main()`. Handlers run on whatever thread calls SDL.
 
 ### `game_host.h`: `GameHostConfig`, `install_game_host`
+
+The game texture is recognised at any logical size from 240x160 up to 2048x2048 (at most 4:1), directly or as an integer-prescaled render target, so every aspect ratio of `view_aspect.h` is covered.
 The six SDL handlers that route a runtime's SDL calls into the library (game-image detection, colour correction, letterboxing with the viewport reported to `PerfHud`, screen mask, frame interpolation, performance HUD, pull-callback and direct-queue audio, call counters and audio metering for diagnostics) so a host does not carry its own copy. A host fills a `GameHostConfig` with the optional callbacks that are specific to its game (`on_poll`, `on_event`, `on_native_frame`, `compute_viewport`, `after_game_image`, `on_present_begin`, `render_present_overlay`, `before_present`, `print_stats`) and calls `install_game_host()` once. The Linux `--wrap` shims (`GBAIMP_DEFINE_LD_WRAPS()`) stay in the host because they must be expanded in the final executable. `is_gba_game_texture()` and `default_game_viewport()` are public helpers.
+
+### `view_aspect.h`: `AspectSettings`, `resolve_view_width`
+
+Turns a player choice (3:2, 16:10, 16:9, 21:9, 32:9, custom ratio, adaptive = follow the window) into the
+logical view width the runtime renders (`width x 160`), clamped to a cap (`max_view_width`, default 640).
+It never touches the runtime: copy `aspect_choices()` and the resolved widths into the host's run options.
+`parse_custom_ratio` accepts `W:H` or a decimal ratio.
+
+### `margin_fill.h`: `MarginFill`
+
+Backdrop for the window area the game image does not cover (pillar / letterbox bars): black (`Pillar`),
+the picture's outermost column / row stretched and dimmed (`EdgeRepeat`), or the picture heavily blurred and
+dimmed (`Blur`). `game_host` draws it before the image on every presented frame, so the picture itself is never
+altered. `set_mode` / `set_brightness` are the only knobs.
 
 ### `widescreen.h`: `Widescreen`, `WidescreenProfile`, `WidescreenBindings`
 The game-independent part of widescreen support. The runtime can render a view wider than 240x160; what the extra columns show is host policy. This module owns the policy that is the same for every game, and the game-specific part (what counts as "wide", which providers, HUD defaults) is a `WidescreenProfile` filled by the host.
