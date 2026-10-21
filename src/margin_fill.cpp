@@ -1,5 +1,7 @@
 #include "gbaimp/margin_fill.h"
 
+#include "gbaimp/host_settings.h"
+
 #include <algorithm>
 
 namespace gbaimp {
@@ -98,6 +100,37 @@ bool MarginFill::draw(SDL_Renderer* renderer, SDL_Texture* texture, const SDL_Re
     }
     SDL_SetTextureScaleMode(texture, old_mode);
     return ok;
+}
+
+void register_margin_fill_settings(SettingsRegistry& reg, MarginFill& fill,
+                                   const MarginFillSettingsOptions& o) {
+    Setting mode;
+    mode.id = o.mode_id;
+    mode.menu_section = o.menu_section;
+    mode.label = o.mode_label;
+    mode.tooltip = o.mode_tooltip;
+    mode.kind = SettingKind::Choice;
+    mode.choices = {"Black (Original)", "Edge repeat", "Blur"};
+    mode.min = 0; mode.max = 2; mode.step = 1;
+    mode.ini_section = o.ini_section;
+    mode.ini_key = o.mode_ini_key;
+    mode.get = [&fill] { return static_cast<int>(fill.settings().mode); };
+    mode.set = [&fill](int v) { fill.set_mode(static_cast<MarginFillMode>(std::clamp(v, 0, 2))); };
+    reg.add(std::move(mode));
+
+    Setting level;
+    level.id = o.brightness_id;
+    level.menu_section = o.menu_section;
+    level.label = o.brightness_label;
+    level.tooltip = o.brightness_tooltip;
+    level.kind = SettingKind::Int;
+    level.min = 0; level.max = 100; level.step = 5;
+    level.ini_section = o.ini_section;
+    level.ini_key = o.brightness_ini_key;
+    level.get = [&fill] { return fill.settings().brightness; };
+    level.set = [&fill](int v) { fill.set_brightness(v); };
+    level.enabled = [&fill] { return fill.settings().mode != MarginFillMode::Pillar; };
+    reg.add(std::move(level));
 }
 
 } // namespace gbaimp

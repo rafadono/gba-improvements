@@ -1,5 +1,6 @@
 #define SDL_MAIN_HANDLED
 #include "test_harness.h"
+#include "gbaimp/host_settings.h"
 #include "gbaimp/margin_fill.h"
 
 #include <vector>
@@ -31,6 +32,21 @@ int main() {
     mf.set_brightness(500); CHECK_EQ(mf.settings().brightness, 100);
     mf.set_brightness(-3);  CHECK_EQ(mf.settings().brightness, 0);
     mf.set_brightness(50);
+
+    {   // registry rows drive the shared instance
+        SettingsRegistry reg;
+        MarginFill local;
+        register_margin_fill_settings(reg, local);
+        CHECK(reg.set("video.margin_fill", 2));
+        CHECK(local.settings().mode == MarginFillMode::Blur);
+        CHECK(reg.set("video.margin_fill", 9));                       // clamped to the last choice
+        CHECK(local.settings().mode == MarginFillMode::Blur);
+        CHECK(reg.set("video.margin_brightness", 80));
+        int v = 0; CHECK(reg.get("video.margin_brightness", v)); CHECK_EQ(v, 80);
+        CHECK(reg.is_enabled("video.margin_brightness"));
+        reg.set("video.margin_fill", 0);
+        CHECK(!reg.is_enabled("video.margin_brightness"));
+    }
 
     // Software rendering: a red 40x20 picture in a 100x20 window leaves 30 px bars each side.
     SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormat(0, 100, 20, 32, SDL_PIXELFORMAT_RGBA32);

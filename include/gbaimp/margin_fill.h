@@ -12,6 +12,7 @@
 #include <SDL.h>
 
 #include <cstdint>
+#include <string>
 
 namespace gbaimp {
 
@@ -45,6 +46,28 @@ private:
     SDL_Texture* blur_target_ = nullptr;
     SDL_Renderer* blur_owner_ = nullptr;
 };
+
+class SettingsRegistry;
+
+// Names and .ini placement of the two settings register_margin_fill_settings() adds.
+struct MarginFillSettingsOptions {
+    std::string mode_id = "video.margin_fill";
+    std::string brightness_id = "video.margin_brightness";
+    std::string menu_section = "Display and Graphics";
+    std::string mode_label = "Screen Margin Fill";
+    std::string mode_tooltip = "What fills the bars around the picture: black, the picture's edge, or a blurred copy";
+    std::string brightness_label = "Margin Fill Brightness";
+    std::string brightness_tooltip = "How bright the margin fill is (percent of the picture)";
+    std::string ini_section = "Video";
+    std::string mode_ini_key = "margin_fill";
+    std::string brightness_ini_key = "margin_brightness";
+};
+
+// Adds a Choice setting (Black / Edge repeat / Blur) and an Int brightness setting (0..100, step 5,
+// greyed out while the mode is Black), both saved to the .ini. Opt in: register_standard_settings()
+// does not call it. `fill` must outlive the registry.
+void register_margin_fill_settings(SettingsRegistry& reg, MarginFill& fill,
+                                   const MarginFillSettingsOptions& options = MarginFillSettingsOptions());
 
 // The up to four bars around `dst` inside a win_w x win_h window: top and bottom span the full
 // width, left and right only the rows of `dst`. Returns the number of non-empty bars written
