@@ -66,6 +66,13 @@ const char* aspect_label(AspectPreset p) {
     return "";
 }
 
+LauncherAspectTable launcher_aspect_table() {
+    static const char* const labels[] = {"3:2 (Original)", "16:10", "16:9", "21:9 (Ultrawide)",
+                                         "32:9 (Super ultrawide)"};
+    static const uint16_t widths[] = {240, 256, 284, 373, 569};
+    return {labels, widths, 5};
+}
+
 bool parse_custom_ratio(const std::string& text, AspectSettings* out) {
     if (!out || text.empty()) return false;
     int w = 0, h = 0;

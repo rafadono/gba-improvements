@@ -39,6 +39,18 @@ int main() {
     CHECK_EQ(aspect_choices().size(), size_t(7));
     CHECK(std::string(aspect_label(AspectPreset::Ultra21x9)).find("21:9") != std::string::npos);
 
+    {   // launcher table agrees with the presets
+        const LauncherAspectTable t = launcher_aspect_table();
+        CHECK_EQ(t.count, 5);
+        const AspectPreset order[] = {AspectPreset::Native, AspectPreset::Wide16x10, AspectPreset::Wide16x9,
+                                      AspectPreset::Ultra21x9, AspectPreset::Super32x9};
+        for (int i = 0; i < t.count; ++i) {
+            AspectSettings p; p.preset = order[i];
+            CHECK_EQ(int(t.widths[i]), resolve_view_width(p));
+            CHECK_EQ(std::string(t.labels[i]), std::string(aspect_label(order[i])));
+        }
+    }
+
     AspectSettings c;
     CHECK(parse_custom_ratio("16:9", &c)); CHECK_EQ(c.custom_w, 16); CHECK_EQ(c.custom_h, 9);
     CHECK(parse_custom_ratio("2.39", &c));  CHECK_EQ(c.custom_w, 239); CHECK_EQ(c.custom_h, 100);

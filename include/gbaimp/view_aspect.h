@@ -61,6 +61,16 @@ struct AspectChoice {
 const std::vector<AspectChoice>& aspect_choices();
 const char* aspect_label(AspectPreset p);
 
+// Fixed presets (Native .. Super32x9) as the static tables a launcher expects
+// (RunOptions::launcher_aspect_labels / launcher_aspect_view_widths / launcher_num_aspects).
+// Widths are the presets' own, before any cap; the arrays live for the whole process.
+struct LauncherAspectTable {
+    const char* const* labels;
+    const uint16_t* widths;
+    int count;
+};
+LauncherAspectTable launcher_aspect_table();
+
 // Parses "16:9", "21:9", "2.39" or "1.7778" into custom_w / custom_h (decimals as x100 fixed
 // point). Returns false and leaves `out` alone for anything else or ratios outside [1.0, 8.0].
 bool parse_custom_ratio(const std::string& text, AspectSettings* out);
