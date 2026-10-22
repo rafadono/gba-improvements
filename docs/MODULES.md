@@ -165,12 +165,43 @@ One handler / real-function design for every platform, used to observe or alter 
 The game texture is recognised at any logical size from 240x160 up to 2048x2048 (at most 4:1), directly or as an integer-prescaled render target, so every aspect ratio of `view_aspect.h` is covered.
 The six SDL handlers that route a runtime's SDL calls into the library (game-image detection, colour correction, letterboxing with the viewport reported to `PerfHud`, screen mask, frame interpolation, performance HUD, pull-callback and direct-queue audio, call counters and audio metering for diagnostics) so a host does not carry its own copy. A host fills a `GameHostConfig` with the optional callbacks that are specific to its game (`on_poll`, `on_event`, `on_native_frame`, `compute_viewport`, `after_game_image`, `on_present_begin`, `render_present_overlay`, `before_present`, `print_stats`) and calls `install_game_host()` once. The Linux `--wrap` shims (`GBAIMP_DEFINE_LD_WRAPS()`) stay in the host because they must be expanded in the final executable. `is_gba_game_texture()` and `default_game_viewport()` are public helpers.
 
-### `view_aspect.h`: `AspectSettings`, `resolve_view_width`
+### `view_aspect.h`: `AspectSettings`, `resolve_view_width`, `resolve_view_size`
 
-Turns a player choice (3:2, 16:10, 16:9, 21:9, 32:9, custom ratio, adaptive = follow the window) into the
-logical view width the runtime renders (`width x 160`), clamped to a cap (`max_view_width`, default 640).
-It never touches the runtime: copy `aspect_choices()` and the resolved widths into the host's run options.
+Turns a player choice (3:2, 16:10, 16:9, 21:9, 32:9, 4:3, 5:4, 10:7, custom ratio, adaptive = follow the window) into the
+logical view the runtime renders, clamped to caps (`max_view_width`, default 640; `max_view_height`, default 320).
+It never touches the runtime: copy `aspect_choices()` and the resolved sizes into the host run options.
 `parse_custom_ratio` accepts `W:H` or a decimal ratio.
+
+- `resolve_view_width()` keeps the original contract: the width at the native 160 rows (a ratio narrower than 3:2 gives 240).
+- `resolve_view_size()` returns a `ViewSize` (`width`, `height`). A ratio of at least 3:2 grows the width at 160 rows; a
+  narrower one keeps 240 columns and grows the rows (`240 / ratio`), so an adaptive window never gets extra rows unless it is
+  taller than 3:2. The tall presets are `Standard4x3` (240x180), `Standard5x4` (240x192) and `Console10x7` (320x224, wider
+  AND taller than native). The enum values of the older presets did not change; `aspect_choices()` lists the tall presets
+  after `Super32x9` (the fixed launcher table of widths, `launcher_aspect_table()`, is unchanged: a launcher only carries widths).
+- `split_extra_rows(height, &top, &bottom, top_share)` splits the extra rows (`top_share` 0.5 = even). Pair it with
+  `split_extra()` for the columns, then set the runtime `ViewGeometry` from the result.
+
+### `affine_margin.h`: `AffineMarginRenderer`, `scan_affine_art_bounds`
+
+Real artwork for the vertical margins of a taller view, for games that draw their scene on a large affine background (modes 1 and 2,
+BG2 / BG3). The runtime never extrapolates an affine layer above or below the native band, and a regular ring would only wrap, so a host
+that wants more rows renders them itself. Per frame the module latches the layer registers and the PPU memory (`PpuMemory`: DISPCNT,
+I/O page, VRAM, palette), finds the bounding box of each layer opaque pixels (`ArtBounds`, cached on a hash of the map and tile
+memory) and samples every margin row with the fixed point arithmetic of the hardware. The sampled position is then clamped to the
+artwork box relative to the map copy that holds the native band, so a row above the art repeats its first row, a row below repeats its
+last row, and the far side of a wrapping map never shows. Layers are composited by hardware priority into `WsMarginPixel` rows.
+- `set_memory_source(fn, user)` + `provide(y, extra_left, extra_right, &left, &width)` is the adapter for the margin pixel provider:
+  native rows return null, the first margin row of a pass re-latches the registers, the rest reuse them.
+- `available_rows()` / `available_cols()` report how many rows / columns of real art lie beyond the native band for the current camera
+  (the camera moves, so hosts can log or cap with it). Unrotated layers only.
+- Options: `layer_mask` (default BG2 + BG3), `clamp_to_art` (off = hardware wrap), `order`.
+- Limits: per-scanline register changes, mosaic, window masks and colour effects are not applied to margin rows; 256 colour affine
+  maps only (the only affine format the hardware has).
+
+### `obj_geometry.h`
+
+Header-only decoding of raw OAM attributes for placement policies: `obj_signed_y`, `obj_signed_x`, `obj_disabled`, `obj_size` and
+`obj_bounds` (affine double-size included).
 
 ### `margin_fill.h`: `MarginFill`
 
@@ -201,7 +232,23 @@ The game-independent part of widescreen support. The runtime can render a view w
 
 **Function-entry hook.** When `profile.on_fn_entry` is set, `install_fn_entry_hook()` chains a trampoline into the runtime's hook slot (the previous hook runs first; installing twice is a no-op; a slot overwritten by someone else is re-chained by the next `update()`) and `remove_fn_entry_hook()` restores the previous one. The trampoline is a plain function, so only `Widescreen::instance()` can install it. `on_fn_entry(pc, user)` runs on the guest thread for every function entry: reject quickly and call `set_wide_context()` when the game changes mode.
 
-**Viewport.** `compute_effective_viewport()` (and the free `widescreen_compute_viewport()`, which has the `GameHostConfig::compute_viewport` signature) polls the context and fills the source rectangle, destination rectangle and base size. Expanded texture (`tex_w * 2 > tex_h * 3`) with a wide context: the whole texture, scaled uniformly and centred. Expanded texture with a narrow context: the central 240x160 area only. Native texture: the whole texture as 240x160. `widescreen_viewport(wide, ...)` is the pure math.
+**Vertical extent (rows).** The runtime can also render extra rows above and below the native 160 (a taller logical view). Pass
+`extra_top` / `extra_bottom` in the bindings (the runtime exports no globals for them: with `widescreen_gbarecomp.h` call
+`gbarecomp_set_vertical_extras(top, bottom)` from the view-geometry callback and the per-frame callback). `view_active()` then
+also becomes true for a view that only adds rows (4:3 at 240 columns); `extra_top()`, `extra_bottom()`, `has_vertical_extent()` and
+`effective_extra_rows()` mirror the column queries. The runtime draws a row outside 0..159 only for content a host authored, and
+fails closed (black) otherwise, so two providers matter:
+- `profile.obj_attr_y_provider` (`g_ws_obj_attr_y_provider`): authorizes a sprite at a signed Y, which is the only way a sprite may be
+  drawn outside the native band (HUD anchored to the top / bottom edge, a world sprite overhanging the band).
+- `profile.margin_pixel_provider` (`g_ws_obj_margin_provider`, `WsMarginPixel`): authored pixels for a margin row. This is how affine
+  backgrounds, which the runtime never extrapolates vertically, get their rows (see `affine_margin.h`).
+- `default_bg_x_provider` suppresses every regular background on a row outside 0..159 (a ring has nothing real to show there).
+- Not wide context: the extra rows are black (`pillarbox`) and `widescreen_viewport_rows()` presents only the central 240x160.
+
+**Viewport.** `compute_effective_viewport()` (and the free `widescreen_compute_viewport()`, which has the `GameHostConfig::compute_viewport` signature) polls the context and fills the source rectangle, destination rectangle and base size. Expanded texture (`tex_w * 2 > tex_h * 3`) with a wide context: the whole texture, scaled uniformly and centred. Expanded texture with a narrow context: the central 240x160 area only. Native texture: the whole texture as 240x160. `widescreen_viewport(wide, ...)` is the pure math. When the view has extra rows the
+instance uses `widescreen_viewport_rows(wide, left, right, top, bottom, ...)`: the texture is `factor` times the logical view, wide
+context shows all of it, narrow context crops the central 240x160 at the real left / top offset (a texture that does not match falls
+back to the older rule).
 
 **Ready-made providers** (use `Widescreen::instance()` and the profile): `default_tilemap_provider` (keep the hardware-wrapped entry while the presentation is active), `default_bg_x_provider` (expanded view only; margin columns only; answers from the margin policy below), `default_obj_attr_x_provider` (sprites parked at raw X >= 256 get their signed X) and `widescreen_obj_x(attr1)`. A provider that tells HUD sprites from world sprites is game specific, so the host writes it (it can call `default_obj_attr_x_provider` for everything else).
 
@@ -284,4 +331,4 @@ A copyable, implicitly convertible wrapper around `std::atomic<T>` with relaxed 
 
 `ctest` runs one executable per module (`tests/test_<module>.cpp`, built on `tests/test_harness.h`). They need no display or audio device (SDL dummy drivers, software renderers). The tests are on by default only for a top-level build; a parent project turns them on with `-DGBAIMP_BUILD_TESTS=ON` (and must call `enable_testing()` itself). As a subproject the targets and test names are prefixed `gbaimp_` to avoid collisions.
 
-The suites are `pixel_art_upscaler`, `screen_filters`, `audio_dsp`, `hd_audio_player`, `dialog_turbo`, `hud_anchoring`, `input_enhancements`, `savestate_thumbnails`, `hooks`, `perf_hud`, `frame_interpolator`, `instances` (independent instances), `audio_pipeline`, `sdl_interpose`, `audio_device`, `audio_threads`, `game_host`, `widescreen` (a fake runtime: plain variables as the g_ws_* values, a fake game mode word, the 3:2 return-to-original invariant, asymmetric extras, the hook chain and the viewport math), `capture_harness`, `host_settings`, `ram_dispatch`, `host_boot`, `m4a_music_hook`, `text_history`, and the text engine suites `text_fonts`, `text_layout`, `text_renderer` and `text_fade`; with Python 3 also `gen_ram_dispatch_py`, `tools_py`, `ram_tools_py` (the RAM snapshot / diff tools against a fake TCP server) and `ram_dispatch_generated`; the build kit tests `buildkit_host_cmake` (fixture host with stubs, configured for the GNU and MSVC branches) and `buildkit_new_host` (template instantiation); plus, when tools/examples are built, `verify_rom_hash_sha1_vectors`, `verify_rom_hash_cli` and `example_minimal_headless`. `sdl_interpose` and `audio_device` exercise the `--wrap` shims on Linux and the IAT patcher on Windows. `-DGBAIMP_SANITIZE=thread` (or `address`, `undefined`; GCC/Clang only) builds the library and tests with that sanitizer; `audio_threads` is the one that matters for the thread-safety contract.
+The suites are `pixel_art_upscaler`, `screen_filters`, `audio_dsp`, `hd_audio_player`, `dialog_turbo`, `hud_anchoring`, `input_enhancements`, `savestate_thumbnails`, `hooks`, `perf_hud`, `frame_interpolator`, `instances` (independent instances), `audio_pipeline`, `sdl_interpose`, `audio_device`, `audio_threads`, `game_host`, `widescreen` (a fake runtime: plain variables as the g_ws_* values, a fake game mode word, the 3:2 return-to-original invariant, asymmetric extras, vertical extras, the hook chain and the viewport math), `view_aspect`, `affine_margin` (a fake PPU: artwork bounds, clamped rows, the map seam, layer priority, headroom, the provider adapter), `obj_geometry`, `capture_harness`, `host_settings`, `ram_dispatch`, `host_boot`, `m4a_music_hook`, `text_history`, and the text engine suites `text_fonts`, `text_layout`, `text_renderer` and `text_fade`; with Python 3 also `gen_ram_dispatch_py`, `tools_py`, `ram_tools_py` (the RAM snapshot / diff tools against a fake TCP server) and `ram_dispatch_generated`; the build kit tests `buildkit_host_cmake` (fixture host with stubs, configured for the GNU and MSVC branches) and `buildkit_new_host` (template instantiation); plus, when tools/examples are built, `verify_rom_hash_sha1_vectors`, `verify_rom_hash_cli` and `example_minimal_headless`. `sdl_interpose` and `audio_device` exercise the `--wrap` shims on Linux and the IAT patcher on Windows. `-DGBAIMP_SANITIZE=thread` (or `address`, `undefined`; GCC/Clang only) builds the library and tests with that sanitizer; `audio_threads` is the one that matters for the thread-safety contract.

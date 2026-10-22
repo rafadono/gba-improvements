@@ -23,6 +23,9 @@ double aspect_ratio(const AspectSettings& s) {
         case AspectPreset::Custom:
             return (s.custom_w > 0 && s.custom_h > 0) ? static_cast<double>(s.custom_w) / s.custom_h : 0.0;
         case AspectPreset::Adaptive:  return 0.0;
+        case AspectPreset::Standard4x3: return 4.0 / 3.0;
+        case AspectPreset::Standard5x4: return 5.0 / 4.0;
+        case AspectPreset::Console10x7: return 10.0 / 7.0;
     }
     return 0.0;
 }
@@ -43,6 +46,49 @@ int resolve_view_width(const AspectSettings& s, int window_w, int window_h) {
     return view_width_for_ratio(aspect_ratio(s), cap);
 }
 
+namespace {
+int height_cap_of(const AspectSettings& s) {
+    return s.max_view_height > 0 ? std::max(s.max_view_height, kNativeViewHeight) : kDefaultMaxViewHeight;
+}
+}
+
+ViewSize view_size_for_ratio(double ratio, int max_width, int max_height) {
+    ViewSize v;
+    if (!(ratio > 0.0)) return v;
+    if (ratio >= 3.0 / 2.0) {
+        v.width = view_width_for_ratio(ratio, max_width);
+        return v;
+    }
+    const double h = std::floor(kNativeViewWidth / ratio + 0.5);
+    const int hi = std::max(max_height, kNativeViewHeight);
+    v.height = static_cast<int>(std::clamp(h, static_cast<double>(kNativeViewHeight), static_cast<double>(hi)));
+    return v;
+}
+
+ViewSize resolve_view_size(const AspectSettings& s, int window_w, int window_h) {
+    const int wcap = cap_of(s);
+    const int hcap = height_cap_of(s);
+    if (s.preset == AspectPreset::Console10x7) {
+        ViewSize v;
+        v.width = std::clamp(320, kNativeViewWidth, std::max(wcap, kNativeViewWidth));
+        v.height = std::clamp(224, kNativeViewHeight, hcap);
+        return v;
+    }
+    if (s.preset == AspectPreset::Adaptive) {
+        if (window_w <= 0 || window_h <= 0) return ViewSize{};
+        return view_size_for_ratio(static_cast<double>(window_w) / window_h, wcap, hcap);
+    }
+    return view_size_for_ratio(aspect_ratio(s), wcap, hcap);
+}
+
+void split_extra_rows(int view_height, int* top, int* bottom, double top_share) {
+    const int extra = std::max(0, view_height - kNativeViewHeight);
+    const double share = std::clamp(top_share, 0.0, 1.0);
+    const int t = std::clamp(static_cast<int>(std::floor(extra * share + 1e-9)), 0, extra);
+    if (top) *top = t;
+    if (bottom) *bottom = extra - t;
+}
+
 void split_extra(int view_width, int* left, int* right) {
     const int extra = std::max(0, view_width - kNativeViewWidth);
     if (left) *left = extra / 2;
@@ -56,6 +102,9 @@ const std::vector<AspectChoice>& aspect_choices() {
         {AspectPreset::Wide16x9, "16:9"},
         {AspectPreset::Ultra21x9, "21:9 (Ultrawide)"},
         {AspectPreset::Super32x9, "32:9 (Super ultrawide)"},
+        {AspectPreset::Standard4x3, "4:3"},
+        {AspectPreset::Standard5x4, "5:4"},
+        {AspectPreset::Console10x7, "10:7 (320x224)"},
         {AspectPreset::Custom, "Custom"},
         {AspectPreset::Adaptive, "Adaptive (follow window)"},
     };

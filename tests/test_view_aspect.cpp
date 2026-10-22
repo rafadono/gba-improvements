@@ -36,8 +36,47 @@ int main() {
 
     CHECK_EQ(view_width_for_ratio(0.0), 240);
     CHECK_EQ(view_width_for_ratio(2.39), 382);
-    CHECK_EQ(aspect_choices().size(), size_t(7));
+    CHECK_EQ(aspect_choices().size(), size_t(10));
     CHECK(std::string(aspect_label(AspectPreset::Ultra21x9)).find("21:9") != std::string::npos);
+
+    {   // taller-than-native views
+        AspectSettings v;
+        auto size = [&](AspectPreset p, int w = 0, int h = 0) { v.preset = p; return resolve_view_size(v, w, h); };
+        CHECK_EQ(size(AspectPreset::Native).width, 240);    CHECK_EQ(size(AspectPreset::Native).height, 160);
+        CHECK_EQ(size(AspectPreset::Wide16x9).width, 284);  CHECK_EQ(size(AspectPreset::Wide16x9).height, 160);
+        CHECK_EQ(size(AspectPreset::Standard4x3).width, 240);  CHECK_EQ(size(AspectPreset::Standard4x3).height, 180);
+        CHECK_EQ(size(AspectPreset::Standard5x4).width, 240);  CHECK_EQ(size(AspectPreset::Standard5x4).height, 192);
+        CHECK_EQ(size(AspectPreset::Console10x7).width, 320);  CHECK_EQ(size(AspectPreset::Console10x7).height, 224);
+        // Adaptive: only a window narrower than 3:2 gets rows; a wider one never does.
+        CHECK_EQ(size(AspectPreset::Adaptive, 1600, 1200).height, 180);
+        CHECK_EQ(size(AspectPreset::Adaptive, 1600, 1200).width, 240);
+        CHECK_EQ(size(AspectPreset::Adaptive, 1920, 1080).height, 160);
+        CHECK_EQ(size(AspectPreset::Adaptive, 1920, 1080).width, 284);
+        CHECK_EQ(size(AspectPreset::Adaptive, 1500, 1000).height, 160);   // exactly 3:2
+        CHECK_EQ(size(AspectPreset::Adaptive, 0, 0).height, 160);
+        CHECK_EQ(size(AspectPreset::Adaptive, 100, 1000).height, kDefaultMaxViewHeight);   // capped
+        v.preset = AspectPreset::Custom; v.custom_w = 5; v.custom_h = 4;
+        CHECK_EQ(resolve_view_size(v).height, 192);
+        CHECK_EQ(resolve_view_width(v), 240);
+        v.preset = AspectPreset::Custom; v.custom_w = 16; v.custom_h = 9;
+        CHECK_EQ(resolve_view_size(v).width, 284); CHECK_EQ(resolve_view_size(v).height, 160);
+        v.max_view_height = 170; v.preset = AspectPreset::Standard5x4;
+        CHECK_EQ(resolve_view_size(v).height, 170);
+        v.preset = AspectPreset::Console10x7; CHECK_EQ(resolve_view_size(v).height, 170);
+        v.max_view_height = 100; v.preset = AspectPreset::Standard4x3;     // never below native
+        CHECK_EQ(resolve_view_size(v).height, 160);
+        v.max_view_height = 0; v.max_view_width = 300; v.preset = AspectPreset::Console10x7;
+        CHECK_EQ(resolve_view_size(v).width, 300);
+        CHECK_EQ(view_size_for_ratio(0.0).height, 160);
+        CHECK_EQ(view_size_for_ratio(0.5).height, kDefaultMaxViewHeight);
+        int t = -1, b = -1;
+        split_extra_rows(224, &t, &b); CHECK_EQ(t, 32); CHECK_EQ(b, 32);
+        split_extra_rows(181, &t, &b); CHECK_EQ(t, 10); CHECK_EQ(b, 11);
+        split_extra_rows(160, &t, &b); CHECK_EQ(t, 0); CHECK_EQ(b, 0);
+        split_extra_rows(100, &t, &b); CHECK_EQ(t, 0); CHECK_EQ(b, 0);
+        split_extra_rows(224, &t, &b, 0.75); CHECK_EQ(t, 48); CHECK_EQ(b, 16);
+        split_extra_rows(224, &t, &b, 2.0); CHECK_EQ(t, 64); CHECK_EQ(b, 0);
+    }
 
     {   // launcher table agrees with the presets
         const LauncherAspectTable t = launcher_aspect_table();

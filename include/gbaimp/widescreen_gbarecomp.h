@@ -17,6 +17,9 @@ extern int (*g_ws_tilemap_provider)(int bg, int hw_x, int screen_y, uint16_t* ou
 extern int (*g_ws_bg_x_provider)(int bg, int output_x, int screen_y, int* out_hw_x);
 extern unsigned g_ws_bg_x_provider_layers;
 extern int (*g_ws_obj_attr_x_provider)(int oam_index, uint16_t attr0, uint16_t attr1, uint16_t attr2, int* out_x);
+extern int (*g_ws_obj_attr_y_provider)(int oam_index, uint16_t attr0, uint16_t attr1, uint16_t attr2, int* out_y);
+// gba::WsMarginObjPixel has the layout of gbaimp::WsMarginPixel (RGB555 + priority + order + flag).
+extern const gbaimp::WsMarginPixel* (*g_ws_obj_margin_provider)(int screen_y, int* hardware_left, int* width);
 extern int g_ws_authored_margin_layers;
 extern int g_ws_obj_native_clip;
 extern int g_ws_pillarbox;
@@ -30,11 +33,31 @@ extern void (*g_runtime_fn_entry_hook)(uint32_t entry_pc);
 
 namespace gbaimp {
 
+// The runtime has no globals for the vertical extras. The host stores them here (from the per-frame
+// ExtendedViewFrameInfo and from its view-geometry callback); the bindings read them.
+struct GbarecompVerticalExtras {
+    unsigned top = 0;
+    unsigned bottom = 0;
+};
+inline GbarecompVerticalExtras& gbarecomp_vertical_extras() {
+    static GbarecompVerticalExtras v;
+    return v;
+}
+inline void gbarecomp_set_vertical_extras(unsigned top, unsigned bottom) {
+    GbarecompVerticalExtras& v = gbarecomp_vertical_extras();
+    v.top = top;
+    v.bottom = bottom;
+}
+
 inline WidescreenBindings gbarecomp_widescreen_bindings() {
     WidescreenBindings b;
     b.active = &g_ws_active;
     b.extra_left = &g_ws_extra_left;
     b.extra_right = &g_ws_extra_right;
+    b.extra_top = &gbarecomp_vertical_extras().top;
+    b.extra_bottom = &gbarecomp_vertical_extras().bottom;
+    b.obj_attr_y_provider = &g_ws_obj_attr_y_provider;
+    b.margin_pixel_provider = &g_ws_obj_margin_provider;
     b.tilemap_provider = &g_ws_tilemap_provider;
     b.bg_x_provider = &g_ws_bg_x_provider;
     b.bg_x_provider_layers = &g_ws_bg_x_provider_layers;

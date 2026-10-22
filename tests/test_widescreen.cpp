@@ -10,6 +10,8 @@ int (*g_ws_tilemap_provider)(int, int, int, uint16_t*) = nullptr;
 int (*g_ws_bg_x_provider)(int, int, int, int*) = nullptr;
 unsigned g_ws_bg_x_provider_layers = 0xFu;
 int (*g_ws_obj_attr_x_provider)(int, uint16_t, uint16_t, uint16_t, int*) = nullptr;
+int (*g_ws_obj_attr_y_provider)(int, uint16_t, uint16_t, uint16_t, int*) = nullptr;
+const gbaimp::WsMarginPixel* (*g_ws_obj_margin_provider)(int, int*, int*) = nullptr;
 int g_ws_authored_margin_layers = 0;
 int g_ws_obj_native_clip = 0;
 int g_ws_pillarbox = 0;
@@ -473,6 +475,106 @@ void test_margin_policy() {
 
 } // namespace
 
+// ---- vertical extent -------------------------------------------------------------------------
+int y_provider(int, uint16_t attr0, uint16_t, uint16_t, int* out_y) {
+    *out_y = (attr0 & 0xFF) >= 160 ? int(attr0 & 0xFF) - 256 : int(attr0 & 0xFF);
+    return 1;
+}
+const WsMarginPixel* margin_row(int, int* left, int* width) {
+    static WsMarginPixel px[4];
+    *left = -2; *width = 4;
+    return px;
+}
+
+void test_vertical_extent() {
+    Widescreen& ws = Widescreen::instance();
+    WidescreenProfile p = make_profile(&ws);
+    p.obj_attr_y_provider = &y_provider;
+    p.margin_pixel_provider = &margin_row;
+    ws.configure(gbarecomp_widescreen_bindings(), p);
+    g_mode_word = kModeField;
+    g_ws_extra_left = g_ws_extra_right = 0;
+    gbarecomp_set_vertical_extras(0, 0);
+    g_ws_active = 0;
+    ws.update();
+    CHECK(!ws.view_active());
+    CHECK(g_ws_obj_attr_y_provider == nullptr);
+    CHECK(g_ws_obj_margin_provider == nullptr);
+
+    // Rows only (a 4:3 style view): the view is active although no column was added.
+    g_ws_active = 1;
+    gbarecomp_set_vertical_extras(10, 10);
+    g_mode_word = kModeWide;
+    ws.update();
+    CHECK(ws.view_active());
+    CHECK(ws.has_vertical_extent());
+    CHECK_EQ(ws.extra_left(), 0); CHECK_EQ(ws.extra_top(), 10); CHECK_EQ(ws.extra_bottom(), 10);
+    CHECK(g_ws_obj_attr_y_provider == &y_provider);
+    CHECK(g_ws_obj_margin_provider == &margin_row);
+    int t = -1, b = -1;
+    ws.effective_extra_rows(&t, &b); CHECK_EQ(t, 10); CHECK_EQ(b, 10);
+    CHECK_EQ(g_ws_authored_margin_layers, 1);
+    CHECK_EQ(g_ws_pillarbox, 0);
+
+    // Outside the wide context the rows are black (pillarbox) and not presented.
+    g_mode_word = kModeField;
+    ws.update();
+    ws.effective_extra_rows(&t, &b); CHECK_EQ(t, 0); CHECK_EQ(b, 0);
+    CHECK_EQ(g_ws_pillarbox, 1);
+    g_mode_word = kModeWide;
+    ws.update();
+
+    // The background provider suppresses every layer on a margin row, even inside the 240 columns.
+    int hw = 0;
+    CHECK_EQ(default_bg_x_provider(2, 100, -5, &hw), -1);
+    CHECK_EQ(default_bg_x_provider(2, 100, 165, &hw), -1);
+    CHECK_EQ(default_bg_x_provider(2, 100, 80, &hw), 0);       // native row, no horizontal margin
+    CHECK(widescreen_is_margin_row(-1)); CHECK(widescreen_is_margin_row(160));
+    CHECK(!widescreen_is_margin_row(0)); CHECK(!widescreen_is_margin_row(159));
+
+    // Back to a native run: the faithful values return.
+    g_ws_active = 0;
+    gbarecomp_set_vertical_extras(0, 0);
+    ws.update();
+    CHECK(!ws.view_active());
+    CHECK(g_ws_obj_attr_y_provider == nullptr);
+    CHECK(g_ws_obj_margin_provider == nullptr);
+    CHECK_EQ(g_ws_authored_margin_layers, 0);
+    CHECK_EQ(ws.extra_top(), 0);
+
+    // Viewport of a 240x180 view (factor 1 and 2): wide = whole texture, narrow = the middle 240x160.
+    SDL_Rect src{}, dst{};
+    int bw = 0, bh = 0;
+    widescreen_viewport_rows(true, 0, 0, 10, 10, 240, 180, 960, 720, &src, &dst, &bw, &bh);
+    CHECK_EQ(src.x, 0); CHECK_EQ(src.y, 0); CHECK_EQ(src.w, 240); CHECK_EQ(src.h, 180);
+    CHECK_EQ(bw, 240); CHECK_EQ(bh, 180);
+    CHECK_EQ(dst.w, 960); CHECK_EQ(dst.h, 720);
+    widescreen_viewport_rows(false, 0, 0, 10, 10, 480, 360, 900, 600, &src, &dst, &bw, &bh);
+    CHECK_EQ(src.x, 0); CHECK_EQ(src.y, 20); CHECK_EQ(src.w, 480); CHECK_EQ(src.h, 320);
+    CHECK_EQ(bw, 240); CHECK_EQ(bh, 160);
+    CHECK_EQ(dst.w, 900); CHECK_EQ(dst.h, 600);
+    // 320x224 with uneven columns: crop offset follows the real left extra.
+    widescreen_viewport_rows(false, 30, 50, 24, 40, 320, 224, 640, 480, &src, &dst, &bw, &bh);
+    CHECK_EQ(src.x, 30); CHECK_EQ(src.y, 24); CHECK_EQ(src.w, 240); CHECK_EQ(src.h, 160);
+    // A texture that is not a whole multiple of the logical view falls back to the legacy rule.
+    widescreen_viewport_rows(true, 0, 0, 10, 10, 250, 190, 800, 600, &src, &dst, &bw, &bh);
+    CHECK_EQ(src.w, 250); CHECK_EQ(src.h, 190);
+    // Through the instance: the live extras pick the rows variant.
+    g_ws_active = 1;
+    g_ws_extra_left = g_ws_extra_right = 40;
+    gbarecomp_set_vertical_extras(32, 32);
+    g_mode_word = kModeField;
+    ws.update();
+    ws.compute_effective_viewport(320, 224, 800, 600, &src, &dst, &bw, &bh);
+    CHECK_EQ(src.x, 40); CHECK_EQ(src.y, 32); CHECK_EQ(src.w, 240); CHECK_EQ(src.h, 160);
+    g_mode_word = kModeWide;
+    ws.compute_effective_viewport(320, 224, 800, 600, &src, &dst, &bw, &bh);
+    CHECK_EQ(src.w, 320); CHECK_EQ(src.h, 224); CHECK_EQ(bw, 320); CHECK_EQ(bh, 224);
+    g_ws_active = 0; g_ws_extra_left = g_ws_extra_right = 0;
+    gbarecomp_set_vertical_extras(0, 0);
+    ws.update();
+}
+
 int main() {
     SDL_SetMainReady();
     test_return_to_original();
@@ -480,5 +582,6 @@ int main() {
     test_pure_viewport();
     test_independent_instance_and_options();
     test_margin_policy();
+    test_vertical_extent();
     return testh::finish("widescreen");
 }

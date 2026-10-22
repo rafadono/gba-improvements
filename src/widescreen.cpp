@@ -51,11 +51,21 @@ int Widescreen::extra_right() const {
     return (view_active() && bindings_.extra_right) ? static_cast<int>(*bindings_.extra_right) : 0;
 }
 
+int Widescreen::extra_top() const {
+    return (view_active() && bindings_.extra_top) ? static_cast<int>(*bindings_.extra_top) : 0;
+}
+
+int Widescreen::extra_bottom() const {
+    return (view_active() && bindings_.extra_bottom) ? static_cast<int>(*bindings_.extra_bottom) : 0;
+}
+
 bool Widescreen::view_active() const {
     if (!bindings_.active || !*bindings_.active) return false;
     const unsigned l = bindings_.extra_left ? *bindings_.extra_left : 0u;
     const unsigned r = bindings_.extra_right ? *bindings_.extra_right : 0u;
-    return (l + r) > 0;
+    const unsigned t = bindings_.extra_top ? *bindings_.extra_top : 0u;
+    const unsigned b = bindings_.extra_bottom ? *bindings_.extra_bottom : 0u;
+    return (l + r + t + b) > 0;
 }
 
 bool Widescreen::presentation_active() const {
@@ -66,6 +76,12 @@ void Widescreen::effective_extra_pixels(int* left, int* right) const {
     const bool wide = presentation_active();
     if (left) *left = wide ? extra_left() : 0;
     if (right) *right = wide ? extra_right() : 0;
+}
+
+void Widescreen::effective_extra_rows(int* top, int* bottom) const {
+    const bool wide = presentation_active();
+    if (top) *top = wide ? extra_top() : 0;
+    if (bottom) *bottom = wide ? extra_bottom() : 0;
 }
 
 // --- policy ---------------------------------------------------------------------------------
@@ -104,6 +120,8 @@ void Widescreen::apply_policy() {
         if (b.bg_x_provider) *b.bg_x_provider = profile_.bg_x_provider;
         if (b.bg_x_provider_layers) *b.bg_x_provider_layers = profile_.bg_x_provider_layers;
         if (b.obj_attr_x_provider) *b.obj_attr_x_provider = profile_.obj_attr_x_provider;
+        if (b.obj_attr_y_provider) *b.obj_attr_y_provider = profile_.obj_attr_y_provider;
+        if (b.margin_pixel_provider) *b.margin_pixel_provider = profile_.margin_pixel_provider;
         if (b.authored_margin_layers) *b.authored_margin_layers = profile_.authored_margin_layers;
         if (b.obj_native_clip) {
             const bool blank_obj = margin_policy().obj == WsMarginPolicy::Blank;
@@ -118,6 +136,8 @@ void Widescreen::apply_policy() {
         if (b.bg_x_provider) *b.bg_x_provider = nullptr;
         if (b.bg_x_provider_layers) *b.bg_x_provider_layers = 0xFu;
         if (b.obj_attr_x_provider) *b.obj_attr_x_provider = nullptr;
+        if (b.obj_attr_y_provider) *b.obj_attr_y_provider = nullptr;
+        if (b.margin_pixel_provider) *b.margin_pixel_provider = nullptr;
         if (b.authored_margin_layers) *b.authored_margin_layers = 0;
         if (b.obj_native_clip) *b.obj_native_clip = 0;
         if (b.pillarbox) *b.pillarbox = 0;
@@ -248,11 +268,48 @@ void widescreen_viewport(bool wide_context, int tex_w, int tex_h, int win_w, int
     }
 }
 
+void widescreen_viewport_rows(bool wide_context, int el, int er, int et, int eb, int tex_w, int tex_h,
+                              int win_w, int win_h, SDL_Rect* out_src, SDL_Rect* out_dst,
+                              int* out_base_w, int* out_base_h) {
+    if (!out_src || !out_dst || tex_w <= 0 || tex_h <= 0 || win_w <= 0 || win_h <= 0) return;
+    el = std::max(el, 0); er = std::max(er, 0); et = std::max(et, 0); eb = std::max(eb, 0);
+    const int lw = 240 + el + er;
+    const int lh = 160 + et + eb;
+    const int factor = tex_w / lw;
+    if (factor < 1 || tex_w != factor * lw || tex_h != factor * lh) {
+        widescreen_viewport(wide_context, tex_w, tex_h, win_w, win_h, out_src, out_dst, out_base_w, out_base_h);
+        return;
+    }
+    if (wide_context) {
+        out_src->x = 0;
+        out_src->y = 0;
+        out_src->w = tex_w;
+        out_src->h = tex_h;
+        if (out_base_w) *out_base_w = lw;
+        if (out_base_h) *out_base_h = lh;
+        fit_uniform(lw, lh, win_w, win_h, out_dst);
+    } else {
+        out_src->x = el * factor;
+        out_src->y = et * factor;
+        out_src->w = 240 * factor;
+        out_src->h = 160 * factor;
+        if (out_base_w) *out_base_w = 240;
+        if (out_base_h) *out_base_h = 160;
+        fit_uniform(240, 160, win_w, win_h, out_dst);
+    }
+}
+
 void Widescreen::compute_effective_viewport(int tex_w, int tex_h, int win_w, int win_h,
                                             SDL_Rect* out_src, SDL_Rect* out_dst,
                                             int* out_base_w, int* out_base_h) {
     if (!out_src || !out_dst || tex_w <= 0 || tex_h <= 0 || win_w <= 0 || win_h <= 0) return;
-    widescreen_viewport(wide_context(), tex_w, tex_h, win_w, win_h, out_src, out_dst, out_base_w, out_base_h);
+    const bool wide = wide_context();
+    if (has_vertical_extent()) {
+        widescreen_viewport_rows(wide, extra_left(), extra_right(), extra_top(), extra_bottom(), tex_w, tex_h,
+                                 win_w, win_h, out_src, out_dst, out_base_w, out_base_h);
+        return;
+    }
+    widescreen_viewport(wide, tex_w, tex_h, win_w, win_h, out_src, out_dst, out_base_w, out_base_h);
 }
 
 void widescreen_compute_viewport(int tex_w, int tex_h, int win_w, int win_h,
@@ -273,9 +330,11 @@ int default_tilemap_provider(int, int, int, uint16_t*) {
     return Widescreen::instance().presentation_active() ? kWsTilemapKeepWrapped : 0;
 }
 
-int default_bg_x_provider(int bg, int output_x, int, int* out_hw_x) {
+int default_bg_x_provider(int bg, int output_x, int screen_y, int* out_hw_x) {
     const Widescreen& ws = Widescreen::instance();
     if (!out_hw_x || !ws.view_active()) return 0;
+    // A row outside the native 160 lines: a background ring has nothing real to show there.
+    if (widescreen_is_margin_row(screen_y)) return -1;
     const int left = ws.extra_left();
     const int right = ws.extra_right();
     if (left == 0 && right == 0) return 0;

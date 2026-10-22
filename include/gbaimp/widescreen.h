@@ -47,7 +47,23 @@ namespace gbaimp {
 using WsTilemapProvider = int (*)(int bg, int hw_x, int screen_y, uint16_t* out_entry);
 using WsBgXProvider = int (*)(int bg, int output_x, int screen_y, int* out_hw_x);
 using WsObjAttrXProvider = int (*)(int oam_index, uint16_t attr0, uint16_t attr1, uint16_t attr2, int* out_x);
+// Sprite Y in native-relative coordinates (rows above 0 / below 159 are the vertical margins). Return 1
+// and set *out_y to authorize the sprite there, 0 to keep the hardware interpretation.
+using WsObjAttrYProvider = int (*)(int oam_index, uint16_t attr0, uint16_t attr1, uint16_t attr2, int* out_y);
 using FnEntryHook = void (*)(uint32_t entry_pc);
+
+// One authored margin pixel (same layout as the runtime's WsMarginObjPixel). RGB555 with bit 15 set =
+// transparent; `priority` is the hardware 0..3 BG/OBJ priority, `order` breaks ties (lower wins).
+struct WsMarginPixel {
+    uint16_t color = 0x8000;
+    uint8_t priority = 3;
+    uint8_t order = 127;
+    bool semi_transparent = false;
+};
+// Called by the runtime for every margin row (signed screen_y; rows outside 0..159 are the vertical
+// margins) and for the horizontal margins of native rows. Return a row of `*width` pixels starting at
+// hardware x `*left` (may be negative), or null for "nothing authored on this row".
+using WsMarginPixelProvider = const WsMarginPixel* (*)(int screen_y, int* left, int* width);
 
 // Return value of a tilemap provider that keeps the hardware-wrapped entry on purpose.
 constexpr int kWsTilemapKeepWrapped = 2;
@@ -94,12 +110,19 @@ struct WidescreenBindings {
     const unsigned* active = nullptr;        // g_ws_active
     const unsigned* extra_left = nullptr;    // g_ws_extra_left
     const unsigned* extra_right = nullptr;   // g_ws_extra_right
+    // Vertical extras. The runtime does not export them as globals: the host keeps two plain values
+    // (updated from the runtime's per-frame info and its view-geometry callback) and points these at
+    // them. Null reads as 0.
+    const unsigned* extra_top = nullptr;
+    const unsigned* extra_bottom = nullptr;
 
     // Policy outputs written by this module.
     WsTilemapProvider* tilemap_provider = nullptr;       // g_ws_tilemap_provider
     WsBgXProvider* bg_x_provider = nullptr;              // g_ws_bg_x_provider
     unsigned* bg_x_provider_layers = nullptr;            // g_ws_bg_x_provider_layers
     WsObjAttrXProvider* obj_attr_x_provider = nullptr;   // g_ws_obj_attr_x_provider
+    WsObjAttrYProvider* obj_attr_y_provider = nullptr;   // g_ws_obj_attr_y_provider
+    WsMarginPixelProvider* margin_pixel_provider = nullptr;   // g_ws_obj_margin_provider
     int* authored_margin_layers = nullptr;               // g_ws_authored_margin_layers
     int* obj_native_clip = nullptr;                      // g_ws_obj_native_clip
     int* pillarbox = nullptr;                            // g_ws_pillarbox
@@ -123,6 +146,10 @@ struct WidescreenProfile {
     WsTilemapProvider tilemap_provider = nullptr;
     WsBgXProvider bg_x_provider = nullptr;
     WsObjAttrXProvider obj_attr_x_provider = nullptr;
+    // Vertical counterparts, installed while the view is expanded (they only matter when it has extra
+    // rows): the sprite Y authorization and the authored margin pixels (see WsMarginPixelProvider).
+    WsObjAttrYProvider obj_attr_y_provider = nullptr;
+    WsMarginPixelProvider margin_pixel_provider = nullptr;
 
     // Values written while the view is expanded.
     unsigned bg_x_provider_layers = 0xFu;
@@ -206,6 +233,12 @@ public:
     // Raw extras of the expanded view regardless of context (0 when the view is not expanded).
     int extra_left() const;
     int extra_right() const;
+    int extra_top() const;
+    int extra_bottom() const;
+    // True when the expanded view has extra rows (a taller-than-160 logical view).
+    bool has_vertical_extent() const { return extra_top() + extra_bottom() > 0; }
+    // Real extra rows while the presentation is active, else 0 / 0. Either pointer may be null.
+    void effective_extra_rows(int* top, int* bottom) const;
 
     // --- presented frames -------------------------------------------------------------------
     void notify_present() { frame_counter_.fetch_add(1, std::memory_order_relaxed); }
@@ -251,6 +284,17 @@ private:
 void widescreen_viewport(bool wide_context, int tex_w, int tex_h, int win_w, int win_h,
                          SDL_Rect* out_src, SDL_Rect* out_dst, int* out_base_w, int* out_base_h);
 
+// Same as widescreen_viewport() for a view that also has extra rows. The texture is `factor` times the
+// logical view (240 + left + right) x (160 + top + bottom); a texture that does not match falls back to
+// widescreen_viewport(). Wide context: the whole texture, scaled uniformly (base = logical size).
+// Narrow context: only the central 240x160 area (offset by the real left / top extras), scaled uniformly.
+void widescreen_viewport_rows(bool wide_context, int extra_left, int extra_right, int extra_top,
+                              int extra_bottom, int tex_w, int tex_h, int win_w, int win_h,
+                              SDL_Rect* out_src, SDL_Rect* out_dst, int* out_base_w, int* out_base_h);
+
+// True for a row outside the native 160 lines (a vertical margin row).
+inline bool widescreen_is_margin_row(int screen_y) { return screen_y < 0 || screen_y >= 160; }
+
 // Same as Widescreen::instance().compute_effective_viewport(...): the signature of
 // GameHostConfig::compute_viewport, so a host can assign it directly.
 void widescreen_compute_viewport(int tex_w, int tex_h, int win_w, int win_h,
@@ -266,7 +310,9 @@ int widescreen_obj_x(uint16_t attr1);
 //                               presentation is active, decline otherwise.
 //   default_bg_x_provider       expanded view only, margin columns only. Answers from the cached
 //                               margin policy of the layer: Blank = suppress (-1), Extend / Runtime =
-//                               unchanged (0). Without profile.margin_policy that is: narrow context
+//                               unchanged (0); rows outside the native 160 lines are always suppressed
+//                               (a BG ring has nothing real there; authored pixels come from the margin
+//                               pixel provider). Without profile.margin_policy that is: narrow context
 //                               blanks every layer, wide context only profile.centered_bg_layers.
 //   default_obj_attr_x_provider expanded view only: sprites parked at raw X >= 256 get their signed X.
 int default_tilemap_provider(int bg, int hw_x, int screen_y, uint16_t* out_entry);
