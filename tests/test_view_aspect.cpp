@@ -51,6 +51,18 @@ int main() {
         }
     }
 
+    {   // table limited to a game's validated maximum
+        LauncherAspectTable t = launcher_aspect_table(284);
+        CHECK_EQ(t.count, 3); CHECK_EQ(int(t.widths[2]), 284);
+        t = launcher_aspect_table(320);
+        CHECK_EQ(t.count, 4); CHECK_EQ(int(t.widths[3]), 320);
+        CHECK(std::string(t.labels[3]).find("320") != std::string::npos);
+        t = launcher_aspect_table(569); CHECK_EQ(t.count, 5);
+        t = launcher_aspect_table(0); CHECK_EQ(t.count, 5);
+        t = launcher_aspect_table(240); CHECK_EQ(t.count, 1); CHECK_EQ(int(t.widths[0]), 240);
+        t = launcher_aspect_table(100); CHECK_EQ(t.count, 1);
+    }
+
     AspectSettings c;
     CHECK(parse_custom_ratio("16:9", &c)); CHECK_EQ(c.custom_w, 16); CHECK_EQ(c.custom_h, 9);
     CHECK(parse_custom_ratio("2.39", &c));  CHECK_EQ(c.custom_w, 239); CHECK_EQ(c.custom_h, 100);

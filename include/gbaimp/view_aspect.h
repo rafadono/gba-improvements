@@ -70,6 +70,11 @@ struct LauncherAspectTable {
     int count;
 };
 LauncherAspectTable launcher_aspect_table();
+// Same, for a game whose validated maximum logical width is `max_width`: only the presets that fit
+// (width <= max_width) and, when the maximum is not itself a preset, a last "Widest (N px)" entry.
+// max_width <= 0 gives the full table. The arrays are static and rebuilt by each call: call it once
+// while filling the run options.
+LauncherAspectTable launcher_aspect_table(int max_width);
 
 // Parses "16:9", "21:9", "2.39" or "1.7778" into custom_w / custom_h (decimals as x100 fixed
 // point). Returns false and leaves `out` alone for anything else or ratios outside [1.0, 8.0].

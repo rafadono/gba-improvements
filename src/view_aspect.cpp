@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 namespace gbaimp {
@@ -71,6 +72,33 @@ LauncherAspectTable launcher_aspect_table() {
                                          "32:9 (Super ultrawide)"};
     static const uint16_t widths[] = {240, 256, 284, 373, 569};
     return {labels, widths, 5};
+}
+
+LauncherAspectTable launcher_aspect_table(int max_width) {
+    const LauncherAspectTable full = launcher_aspect_table();
+    if (max_width <= 0) return full;
+    static const char* labels[8];
+    static uint16_t widths[8];
+    static char widest_label[32];
+    int n = 0;
+    for (int i = 0; i < full.count && n < 7; ++i) {
+        if (full.widths[i] > max_width) break;
+        labels[n] = full.labels[i];
+        widths[n] = full.widths[i];
+        ++n;
+    }
+    if (n == 0) {   // cap below native: native only
+        labels[0] = full.labels[0];
+        widths[0] = full.widths[0];
+        n = 1;
+    }
+    if (max_width > widths[n - 1] && max_width >= kNativeViewWidth + 16) {
+        std::snprintf(widest_label, sizeof(widest_label), "Widest (%d px)", max_width);
+        labels[n] = widest_label;
+        widths[n] = static_cast<uint16_t>(max_width);
+        ++n;
+    }
+    return {labels, widths, n};
 }
 
 bool parse_custom_ratio(const std::string& text, AspectSettings* out) {
